@@ -1,13 +1,12 @@
 {
   "rules": {
+    ".read": false,
+    ".write": false,
     "rooms": {
       "$code": {
         ".read": "auth != null",
         ".write": "auth != null",
-        "seats": {
-          ".validate": true
-        },
-        ".validate": "newData.hasChildren(['status']) || data.exists()"
+        ".validate": "$code.matches(/^[A-Z0-9]{4,6}$/)"
       }
     }
   }
