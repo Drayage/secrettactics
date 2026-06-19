@@ -1328,39 +1328,65 @@ function switchLobbyTab(which){
   document.getElementById('paneJoin').classList.toggle('active', which==='join');
 }
 
+function fbErr(e){
+  const m=(e&&(e.code||e.message))||String(e);
+  if(/permission|PERMISSION_DENIED/i.test(m))
+    return 'DB 쓰기 권한 거부 — Realtime Database 규칙에 chetics_rooms 블록을 추가했는지 확인하세요. ('+m+')';
+  return m;
+}
+
 async function createRoom(){
+  const st=document.getElementById('createStatus');
   if(!window.MP.configured()){ document.getElementById('fbWarn').style.display='block'; return; }
-  try{ await window.MP.init(); }catch(e){ alert('Firebase 초기화 실패: '+e.message); return; }
-  GAME_SETTINGS.mapKey=document.getElementById('lobbyMap').value;
-  GAME_SETTINGS.obstacleKey=document.getElementById('lobbyObstacle').value;
-  applyGameSettings();
-  const code=genCode();
-  await window.MP._set('chetics_rooms/'+code, {
-    status:'placing', settings:GAME_SETTINGS, seats:{host:window.MP.uid()},
-    ready:{player:false, ai:false}, seq:0, ts:Date.now()
-  });
-  window.MP._onDisconnectRemove('chetics_rooms/'+code);  // 호스트 이탈 시 방 정리
-  enterOnline(code,'host','player');
+  const btn=document.getElementById('createRoomBtn');
+  btn.disabled=true; btn.textContent='연결 중…';
+  try{
+    await window.MP.init();
+    GAME_SETTINGS.mapKey=document.getElementById('lobbyMap').value;
+    GAME_SETTINGS.obstacleKey=document.getElementById('lobbyObstacle').value;
+    applyGameSettings();
+    const code=genCode();
+    await window.MP._set('chetics_rooms/'+code, {
+      status:'placing', settings:GAME_SETTINGS, seats:{host:window.MP.uid()},
+      ready:{player:false, ai:false}, seq:0, ts:Date.now()
+    });
+    window.MP._onDisconnectRemove('chetics_rooms/'+code);  // 호스트 이탈 시 방 정리
+    enterOnline(code,'host','player');
+  }catch(e){
+    console.error('createRoom 실패:', e);
+    if(st){ st.parentElement.style.display='block'; st.textContent='방 생성 실패: '+fbErr(e); }
+    else alert('방 생성 실패: '+fbErr(e));
+  }finally{
+    btn.disabled=false; btn.textContent='방 생성';
+  }
 }
 
 async function joinRoom(){
   const code=(document.getElementById('joinCodeInput').value||'').trim().toUpperCase();
   const st=document.getElementById('joinStatus');
-  if(code.length<5){ st.textContent='코드 5자리를 입력하세요.'; return; }
+  if(code.length<4){ st.textContent='방 코드를 입력하세요.'; return; }
   if(!window.MP.configured()){ document.getElementById('fbWarn').style.display='block'; return; }
-  try{ await window.MP.init(); }catch(e){ st.textContent='Firebase 초기화 실패: '+e.message; return; }
-  const room=await window.MP._get('chetics_rooms/'+code);
-  if(!room){ st.textContent='방을 찾을 수 없습니다.'; return; }
-  if(room.seats && room.seats.guest){ st.textContent='이미 가득 찬 방입니다.'; return; }
-  await window.MP._update('chetics_rooms/'+code+'/seats', {guest:window.MP.uid()});
-  window.MP._onDisconnectRemove('chetics_rooms/'+code+'/seats/guest');
-  // 호스트 설정 수신·적용
-  const s=room.settings||{};
-  if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
-  if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
-  if(s.counts) GAME_SETTINGS.counts={...s.counts};
-  applyGameSettings();
-  enterOnline(code,'guest','ai');
+  const btn=document.getElementById('joinRoomBtn');
+  btn.disabled=true; btn.textContent='연결 중…'; st.textContent='';
+  try{
+    await window.MP.init();
+    const room=await window.MP._get('chetics_rooms/'+code);
+    if(!room){ st.textContent='방을 찾을 수 없습니다. (코드 확인)'; return; }
+    if(room.seats && room.seats.guest){ st.textContent='이미 가득 찬 방입니다.'; return; }
+    await window.MP._update('chetics_rooms/'+code+'/seats', {guest:window.MP.uid()});
+    window.MP._onDisconnectRemove('chetics_rooms/'+code+'/seats/guest');
+    const s=room.settings||{};
+    if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
+    if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
+    if(s.counts) GAME_SETTINGS.counts={...s.counts};
+    applyGameSettings();
+    enterOnline(code,'guest','ai');
+  }catch(e){
+    console.error('joinRoom 실패:', e);
+    st.textContent='참가 실패: '+fbErr(e);
+  }finally{
+    btn.disabled=false; btn.textContent='참가';
+  }
 }
 
 let _roomSubscribed=false;
