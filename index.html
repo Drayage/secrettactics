@@ -841,9 +841,10 @@ function getValidMoves(r,c){
     const nr=r+dr, nc=c+dc;
     if(!inBounds(nr,nc)) continue;
     if(isBlocked(nr,nc)) continue;
-    if(noBack && noBack.r===nr && noBack.c===nc) continue; // 왕복 금지
     const t = gameState.board[nr][nc];
     if(t && t.owner===u.owner) continue; // 아군 칸 불가
+    // 왕복 금지 — 단, 떠나온 칸에 적이 들어와 있으면 공격을 위해 예외적으로 허용
+    if(noBack && noBack.r===nr && noBack.c===nc && !(t && t.owner!==u.owner)) continue;
     moves.push({r:nr,c:nc,attack: !!t});
   }
   return moves;
@@ -867,13 +868,11 @@ function resolveCombat(att, def){
   // 3) 별 유닛 vs 별킬러 — 별킬러 무조건 승리 (공/수 무관)
   if(att.role==='starkiller' && def.isStar) return 'attacker';
   if(def.role==='starkiller' && att.isStar) return 'defender';
-  // 4) 제거반 — 폭탄 외 모든 유닛에게 패배
-  if(att.role==='defuser') return 'defender';
-  if(def.role==='defuser') return 'attacker';
-  // 5) 일반 전투력 비교
+  // 4) 일반 전투력 비교 (특수유닛 서열 제거반0 > 스파이-1 > 별킬러-2 > 왕-3 도 이 비교를 따름)
+  //    제거반(0)은 일반 숫자(1~9)·별엔 어차피 지고, 특수유닛에겐 이긴다.
   if(att.power > def.power) return 'attacker';
   if(att.power < def.power) return 'defender';
-  // 6) 동점 -> 공격자(선공) 필승
+  // 5) 동점 -> 공격자(선공) 필승
   return 'attacker';
 }
 
