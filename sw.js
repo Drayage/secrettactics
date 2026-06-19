@@ -1,6 +1,8 @@
-/* 서비스워커 — 앱 셸 cache-first (싱글플레이 오프라인 동작).
-   Firebase(CDN/RTDB) 요청은 항상 네트워크로 보냄. */
-const CACHE = 'chetics-v1';
+/* 서비스워커
+   - HTML 문서: network-first (항상 최신 index.html, 오프라인 시 캐시 폴백)
+   - 정적 에셋(아이콘 등): cache-first
+   - Firebase(CDN/RTDB) 요청은 통과(네트워크) */
+const CACHE = 'chetics-v2';
 const SHELL = [
   './',
   './index.html',
@@ -22,18 +24,32 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+function putCache(req, res){
+  const copy = res.clone();
+  caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+  return res;
+}
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  // 동일 출처 GET만 캐시 대상. 그 외(Firebase 등)는 네트워크 통과.
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+
+  const isHTML = e.request.mode === 'navigate' ||
+                 (e.request.headers.get('accept') || '').includes('text/html');
+
+  if (isHTML) {
+    // 최신 HTML 우선, 실패 시 캐시
+    e.respondWith(
+      fetch(e.request).then((res) => putCache(e.request, res))
+        .catch(() => caches.match(e.request).then((h) => h || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // 정적 에셋: 캐시 우선
   e.respondWith(
     caches.match(e.request).then((hit) =>
-      hit ||
-      fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-        return res;
-      }).catch(() => caches.match('./index.html'))
+      hit || fetch(e.request).then((res) => putCache(e.request, res))
     )
   );
 });
