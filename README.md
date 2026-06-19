@@ -27,7 +27,18 @@
 2. **익명 인증** 활성화: Authentication → 로그인 방법 → 익명 사용 설정.
 3. 웹 앱 설정값을 `index.html`의 `FIREBASE_CONFIG`(상단 `<script type="module">`)에 붙여넣기.
    `databaseURL`(RTDB) 포함 필수. (웹 config는 공개값이라 비밀이 아님.)
-4. DB 보안 규칙은 `database.rules.json` 사용.
+4. **DB 보안 규칙(merge)**: 이 게임은 데이터를 최상위 `chetics_rooms/` 경로에만 쓴다(다른 앱과 경로 충돌 방지).
+   기존 규칙을 **교체하지 말고**, 아래 블록을 기존 `rules`에 **추가**한다 (`database.rules.json` 참고):
+   ```json
+   "chetics_rooms": {
+     "$code": {
+       ".read": "auth != null",
+       ".write": "auth != null",
+       ".validate": "$code.matches(/^[A-Z0-9]{4,6}$/)"
+     }
+   }
+   ```
+   > 같은 프로젝트에 다른 게임이 있으면 규칙은 콘솔에서 직접 병합한다. `firebase deploy`는 **Hosting만** 배포하며 DB 규칙은 건드리지 않는다(firebase.json에 database 섹션 없음).
 
 ### 플레이 흐름
 - 모드 선택 → **온라인 대전** → 방 만들기(코드 발급) / 방 참가(코드 입력).

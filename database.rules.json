@@ -2,7 +2,7 @@
   "rules": {
     ".read": false,
     ".write": false,
-    "rooms": {
+    "chetics_rooms": {
       "$code": {
         ".read": "auth != null",
         ".write": "auth != null",

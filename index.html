@@ -1335,11 +1335,11 @@ async function createRoom(){
   GAME_SETTINGS.obstacleKey=document.getElementById('lobbyObstacle').value;
   applyGameSettings();
   const code=genCode();
-  await window.MP._set('rooms/'+code, {
+  await window.MP._set('chetics_rooms/'+code, {
     status:'placing', settings:GAME_SETTINGS, seats:{host:window.MP.uid()},
     ready:{player:false, ai:false}, seq:0, ts:Date.now()
   });
-  window.MP._onDisconnectRemove('rooms/'+code);  // 호스트 이탈 시 방 정리
+  window.MP._onDisconnectRemove('chetics_rooms/'+code);  // 호스트 이탈 시 방 정리
   enterOnline(code,'host','player');
 }
 
@@ -1349,11 +1349,11 @@ async function joinRoom(){
   if(code.length<5){ st.textContent='코드 5자리를 입력하세요.'; return; }
   if(!window.MP.configured()){ document.getElementById('fbWarn').style.display='block'; return; }
   try{ await window.MP.init(); }catch(e){ st.textContent='Firebase 초기화 실패: '+e.message; return; }
-  const room=await window.MP._get('rooms/'+code);
+  const room=await window.MP._get('chetics_rooms/'+code);
   if(!room){ st.textContent='방을 찾을 수 없습니다.'; return; }
   if(room.seats && room.seats.guest){ st.textContent='이미 가득 찬 방입니다.'; return; }
-  await window.MP._update('rooms/'+code+'/seats', {guest:window.MP.uid()});
-  window.MP._onDisconnectRemove('rooms/'+code+'/seats/guest');
+  await window.MP._update('chetics_rooms/'+code+'/seats', {guest:window.MP.uid()});
+  window.MP._onDisconnectRemove('chetics_rooms/'+code+'/seats/guest');
   // 호스트 설정 수신·적용
   const s=room.settings||{};
   if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
@@ -1371,7 +1371,7 @@ function enterOnline(code, role, side){
   initGame();
   document.getElementById('startBtn').textContent='준비 완료';
   document.getElementById('onlineInfo').textContent=`방 ${code} · ${role==='host'?'호스트':'게스트'}`;
-  if(!_roomSubscribed){ window.MP._onValue('rooms/'+code, handleRoom); _roomSubscribed=true; }
+  if(!_roomSubscribed){ window.MP._onValue('chetics_rooms/'+code, handleRoom); _roomSubscribed=true; }
   log(`온라인 대전 입장 (방 ${code}). 내 진영을 배치하고 '준비 완료'를 누르세요.`,'sys');
 }
 
@@ -1413,7 +1413,7 @@ function buildInitialOnlineState(room){
   gameState.lastMove={player:null, ai:null};
   gameState.seq=1;
   gameState.log.push({msg:`게임 시작! @${gameState.turn} 선공.`, type:'sys', side:null});
-  window.MP._update('rooms/'+gameState.online.code, { status:'playing', state: serializeState() });
+  window.MP._update('chetics_rooms/'+gameState.online.code, { status:'playing', state: serializeState() });
   renderLog(); render();
 }
 
@@ -1426,8 +1426,8 @@ function onlineReady(){
       const u=gameState.board[r][c];
       if(u && u.owner===me) list.push({key:u.key, r, c});
     }
-  window.MP._set('rooms/'+gameState.online.code+'/placements/'+me, list);
-  window.MP._update('rooms/'+gameState.online.code+'/ready', {[me]:true});
+  window.MP._set('chetics_rooms/'+gameState.online.code+'/placements/'+me, list);
+  window.MP._update('chetics_rooms/'+gameState.online.code+'/ready', {[me]:true});
   const btn=document.getElementById('startBtn');
   btn.disabled=true; btn.textContent='상대 대기 중…';
   log('준비 완료 — 상대를 기다립니다…','sys');
@@ -1478,7 +1478,7 @@ function applyRemoteState(s){
 function pushState(){
   if(gameState.mode!=='online' || !gameState.online) return;
   gameState.seq++;
-  window.MP._set('rooms/'+gameState.online.code+'/state', serializeState());
+  window.MP._set('chetics_rooms/'+gameState.online.code+'/state', serializeState());
 }
 
 function backToMenu(){ location.reload(); }
