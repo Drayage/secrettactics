@@ -105,7 +105,12 @@
   .unit{
     width:calc(var(--cs) - 6px);height:calc(var(--cs) - 6px);border-radius:7px;display:flex;
     align-items:center;justify-content:center;font-size:calc(var(--cs)*0.4);line-height:1;
-    text-align:center;padding:1px;font-weight:800;
+    text-align:center;padding:1px;font-weight:800;position:relative;
+  }
+  /* 특수유닛 우하단 파워 표기 */
+  .unit .sub{
+    position:absolute;right:1px;bottom:0;font-size:calc(var(--cs)*0.26);font-weight:800;
+    line-height:1;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;pointer-events:none;
   }
   .unit.mine{background:linear-gradient(160deg,#2e3c5c,#243049);color:var(--text);border:1px solid #46598a;}
   .unit.mine.star{background:linear-gradient(160deg,#5a4a16,#3d3210);color:var(--star);border-color:#9a821f;}
@@ -119,13 +124,6 @@
   .unit.enemy.revealed{
     background:linear-gradient(160deg,#9c2b22,#6e1d17);
     border:2px solid var(--warn);color:#ffe8d6;
-  }
-  /* 내 유닛이 적 스파이를 잡아 정체가 상대에게 노출됨 */
-  .unit.mine.exposed{box-shadow:inset 0 0 0 2px var(--warn);position:relative;}
-  .unit.mine.exposed::after{
-    content:"👁";position:absolute;top:-6px;right:-5px;font-size:calc(var(--cs)*0.3);
-    background:#13233a;border-radius:50%;line-height:1;padding:1px 2px;
-    border:1px solid var(--warn);
   }
 
   /* Side panels */
@@ -263,11 +261,11 @@
       <div class="legend">
         <b>★ 별</b>은 강력하나 <b>🗡️ 별킬러</b>에게 무조건 패배.<br>
         <b>💣 폭탄</b>(이동불가)은 부딪힌 유닛을 <b>무조건 격파</b>, 단 <b>✂️ 제거반</b>에게만 해체.<br>
-        <b>🕵️ 스파이</b>는 죽을 때 자신을 죽인 적의 정체를 폭로.<br>
+        <b>🕵️ 스파이</b>가 죽으면 <b>나만</b> 가해자의 정체를 알게 됨(완전 블라인드).<br>
         <b>👑 왕</b>(이동불가)은 모든 유닛에게 패배, 잡히면 게임 종료.<br>
         Power 동점 시 <b>공격자(선공)</b>가 승리.<br>
         방금 움직인 유닛은 다음 턴에 같은 칸으로 <b>되돌아갈 수 없음</b>.<br>
-        내 유닛이 적 스파이를 처치하면 <b>👁</b>로 표시 — 정체가 상대에게 <b>노출</b>됨.
+        특수유닛 우하단 숫자는 강약 표기(제거반 -1 / 스파이 -2 / 별킬러 -3).
       </div>
     </div>
   </div>
@@ -450,10 +448,10 @@ const UNIT_CONFIG = [
     const n = 9 - i;
     return { key:'num'+n, label:String(n), icon:String(n), power:n, count:1, cls:'num' };
   }),
-  // 특수 유닛 서열
-  { key:'defuser',   label:'제거반', icon:'✂️', power:0,  count:2, role:'defuser',   cls:'special' }, // 제거반: 폭탄만 해체
-  { key:'spy',       label:'스파이', icon:'🕵️', power:-1, count:2, role:'spy',        cls:'special' }, // 사망 시 정체 폭로
-  { key:'starkiller',label:'별킬러', icon:'🗡️', power:-2, count:1, role:'starkiller', cls:'special' },// 별 유닛 무조건 승
+  // 특수 유닛 서열 (sub: 우하단 파워 표기)
+  { key:'defuser',   label:'제거반', icon:'✂️', sub:'-1', power:0,  count:2, role:'defuser',   cls:'special' }, // 제거반: 폭탄만 해체
+  { key:'spy',       label:'스파이', icon:'🕵️', sub:'-2', power:-1, count:2, role:'spy',        cls:'special' }, // 사망 시 정체 폭로
+  { key:'starkiller',label:'별킬러', icon:'🗡️', sub:'-3', power:-2, count:1, role:'starkiller', cls:'special' },// 별 유닛 무조건 승
   { key:'king',      label:'왕',   icon:'👑', power:-3, count:1, role:'king', movable:false, cls:'king' },   // 이동불가·모두에게 패배
   { key:'gas',       label:'폭탄',  icon:'💣', power:null,count:2, role:'gas', movable:false, isGas:true, cls:'special' }, // 이동불가·부딪히면 무조건 승리
 ];
@@ -585,13 +583,14 @@ function makeUnit(def, owner){
     owner,                 // 'player' | 'ai'
     label: def.label,
     icon: def.icon,
+    sub: def.sub || null,  // 우하단 파워 표기 (특수유닛)
     power: def.power,
     role: def.role || null,
     isStar: !!def.isStar,
     isGas: !!def.isGas,
     movable: isMovableDef(def),
     cls: def.cls,
-    revealed: false,       // 적 유닛이 폭로되었는지 (블라인드 해제)
+    revealedTo: null,      // 이 유닛 정체를 알게 된 상대 진영('player'|'ai'|null)
   };
 }
 
@@ -911,8 +910,7 @@ function doMove(from, to, mover){
   } else if(result==='defender'){
     handleSpyReveal(att, target);            // 공격자가 스파이면 폭로
     if(att.role==='king') registerKingLoss(att.owner);
-    gameState.board[from.r][from.c] = null;  // 공격자 소멸
-    target.revealed = true;                  // 막아낸 방어 유닛 정체 노출
+    gameState.board[from.r][from.c] = null;  // 공격자 소멸 (방어 유닛은 정체 비공개)
     recordMove(false);
     log(`${aName} ⚔ ${dName} → <b>${dName} 승리</b>`, 'combat', target.owner);
   } else { // both (양쪽 소멸)
@@ -929,14 +927,15 @@ function doMove(from, to, mover){
   checkWin();
 }
 
-// 로그용 유닛 표기: @<side> <label> (렌더 시 시점에 맞춰 아군/상대로 치환)
-function nm(u){ return `@${u.owner} ${u.label}`; }
+// 로그용 유닛 표기: @<side>:<label> (렌더 시 시점에 맞춰 — 내 것만 라벨, 상대는 ?)
+function nm(u){ return `@${u.owner}:${u.label}`; }
 
-// 스파이가 죽을 때 자신을 죽인 유닛의 정체 폭로
+// 스파이가 죽을 때, 그를 죽인 유닛의 정체를 '스파이 소유자에게만' 공개
 function handleSpyReveal(dying, killer){
   if(dying.role==='spy' && killer){
-    killer.revealed = true;
-    log(`💀 @${dying.owner} 스파이가 쓰러지며 ${nm(killer)}의 정체를 폭로!`, 'spy');
+    killer.revealedTo = dying.owner;   // 스파이 소유자가 가해자를 알게 됨
+    // 이 로그는 스파이 소유자에게만 보임. 가해자 라벨은 강제 공개(@!).
+    log(`💀 @${dying.owner} 스파이가 쓰러지며 @!${killer.owner}:${killer.label}의 정체를 폭로!`, 'spy', null, dying.owner);
   }
 }
 
@@ -1069,24 +1068,31 @@ function playerNear(pos){
 /* =================================================================
    로그
    ================================================================= */
-// type: 'sys'|'spy'|'combat'  /  side: 유리한 진영(승패 색상 시점화용, 선택)
-function log(msg, type='sys', side=null){
-  const entry={msg,type,side};
+// type: 'sys'|'spy'|'combat'  /  side: 유리한 진영(승패 색상, 선택)  /  only: 이 진영에게만 표시(선택)
+function log(msg, type='sys', side=null, only=null){
+  const entry={msg,type,side,only};
   gameState.log.push(entry);
   if(gameState.log.length>60) gameState.log.shift();
   appendLogEntry(entry);
 }
-// 로그 한 줄을 내 시점으로 치환해 DOM에 추가
+// 로그 메시지를 내 시점으로 치환 (순수함수 — 테스트용)
+//  @!<side>:<label> → 항상 라벨 공개   /   @<side>:<label> → 내것만 라벨, 상대는 ?   /   @<side> → 아군/상대
+function localizeLogMsg(msg, mySide){
+  const word=(s)=> s===mySide ? '아군' : '상대';
+  return msg
+    .replace(/@!(player|ai):(\S+)/g, (_,s,l)=> `${word(s)} ${l}`)
+    .replace(/@(player|ai):(\S+)/g,  (_,s,l)=> s===mySide ? `${word(s)} ${l}` : `${word(s)} ?`)
+    .replace(/@(player|ai)\b/g,      (_,s)=> word(s));
+}
+// 로그 한 줄을 내 시점으로 치환해 DOM에 추가 (only가 내 진영이 아니면 스킵)
 function appendLogEntry(entry){
+  if(entry.only && entry.only!==gameState.mySide) return;
   const box=document.getElementById('log');
   const div=document.createElement('div');
   let cls='entry '+(entry.type==='combat'?'':entry.type);
   if(entry.side) cls+=' '+(entry.side===gameState.mySide?'win':'lose');
   div.className=cls.trim();
-  // @player/@ai → 내 시점(아군/상대)으로 치환
-  div.innerHTML=entry.msg
-    .replace(new RegExp('@'+gameState.mySide,'g'),'아군')
-    .replace(new RegExp('@'+opponentSide(gameState.mySide),'g'),'상대');
+  div.innerHTML=localizeLogMsg(entry.msg, gameState.mySide);
   box.appendChild(div);
   box.scrollTop=box.scrollHeight;
 }
@@ -1169,6 +1175,7 @@ function render(){
         const div=document.createElement('div');
         div.className='unit';
         const mine = u.owner===me;
+        const visible = mine || u.revealedTo===me;   // 정체가 내게 보이는가
         if(mine){
           // 내 유닛: 알록달록 (계급별 색)
           div.classList.add('mine');
@@ -1176,13 +1183,17 @@ function render(){
           else if(u.role==='king') div.classList.add('king');
           else if(u.cls==='special') div.classList.add('special');
           div.textContent=u.icon;
-          // 적 스파이를 잡아 내 정체가 상대에게 노출된 유닛 표시
-          if(u.revealed) div.classList.add('exposed');
         } else {
-          // 상대 유닛: 항상 빨간색 고정. 내게 드러났으면 아이콘 공개, 아니면 ?
+          // 상대 유닛: 항상 빨간색 고정. 내 스파이로 알아냈으면 공개, 아니면 ?
           div.classList.add('enemy');
-          if(u.revealed){ div.classList.add('revealed'); div.textContent=u.icon; }
+          if(visible){ div.classList.add('revealed'); div.textContent=u.icon; }
           else div.textContent='?';
+        }
+        // 특수유닛 파워 표기 (정체가 보일 때만)
+        if(visible && u.sub){
+          const sb=document.createElement('span');
+          sb.className='sub'; sb.textContent=u.sub;
+          div.appendChild(sb);
         }
         cell.appendChild(div);
 
