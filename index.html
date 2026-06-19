@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPER TACTICS / CHETICS — 블라인드 심리전</title>
+<style>
+  /* ============================================================
+     THEME (Dark / Modern)
+     ============================================================ */
+  :root{
+    --bg:#0d1017;
+    --bg-soft:#151a23;
+    --panel:#1a2030;
+    --panel-2:#212a3d;
+    --border:#2c3650;
+    --accent:#5b8cff;
+    --accent-2:#7c5cff;
+    --good:#37d39a;
+    --bad:#ff5d6c;
+    --warn:#ffb454;
+    --text:#e6ebf5;
+    --text-dim:#8b97ad;
+    --hidden:#c0392b;
+    --star:#ffd86b;
+    --special:#9b7bff;
+    --num:#3f4d6b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;background:radial-gradient(1200px 700px at 70% -10%, #1a2233 0%, var(--bg) 60%);
+    color:var(--text);font-family:'Segoe UI',system-ui,'Malgun Gothic',sans-serif;
+    min-height:100vh;
+  }
+  header{
+    text-align:center;padding:18px 10px 6px;
+  }
+  header h1{
+    margin:0;font-size:22px;letter-spacing:3px;font-weight:800;
+    background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  header p{margin:4px 0 0;color:var(--text-dim);font-size:12px;letter-spacing:1px;}
+
+  .wrap{
+    display:flex;gap:18px;justify-content:center;align-items:flex-start;
+    padding:16px;flex-wrap:wrap;max-width:1180px;margin:0 auto;
+  }
+
+  /* Board */
+  .board-area{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .status-bar{
+    display:flex;gap:10px;align-items:center;justify-content:center;
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:8px 16px;font-size:13px;min-width:320px;
+  }
+  .turn-pill{
+    padding:3px 12px;border-radius:20px;font-weight:700;font-size:12px;
+    background:var(--panel-2);border:1px solid var(--border);
+  }
+  .turn-pill.player{color:var(--good);border-color:var(--good);}
+  .turn-pill.ai{color:var(--bad);border-color:var(--bad);}
+
+  #board{
+    display:grid;gap:3px;background:var(--bg-soft);
+    padding:8px;border-radius:14px;border:1px solid var(--border);
+    box-shadow:0 12px 40px rgba(0,0,0,.5);
+  }
+  .cell{
+    width:48px;height:48px;border-radius:8px;background:var(--panel);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;font-size:14px;cursor:default;position:relative;
+    border:1px solid transparent;transition:transform .06s, box-shadow .1s;
+    user-select:none;
+  }
+  .cell.zone-player{background:#13233a;}
+  .cell.zone-ai{background:#2a1620;}
+  .cell.placeable{outline:2px dashed #3a567d;outline-offset:-3px;cursor:pointer;}
+  .cell.clickable{cursor:pointer;}
+  .cell.selected{box-shadow:0 0 0 3px var(--accent), 0 0 18px rgba(91,140,255,.6);transform:translateY(-1px);}
+  .cell.movehint{cursor:pointer;}
+  .cell.movehint::after{
+    content:"";position:absolute;width:14px;height:14px;border-radius:50%;
+    background:rgba(55,211,154,.55);
+  }
+  .cell.attackhint{cursor:pointer;box-shadow:inset 0 0 0 3px var(--bad);}
+
+  .unit{
+    width:42px;height:42px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;font-size:13px;line-height:1;
+    text-align:center;padding:1px;
+  }
+  .unit.mine{background:linear-gradient(160deg,#2e3c5c,#243049);color:var(--text);border:1px solid #46598a;}
+  .unit.mine.star{background:linear-gradient(160deg,#5a4a16,#3d3210);color:var(--star);border-color:#9a821f;}
+  .unit.mine.special{background:linear-gradient(160deg,#3a2c5e,#2a2046);color:#d6c8ff;border-color:#6a52a8;}
+  .unit.mine.king{background:linear-gradient(160deg,#6a3b12,#4a2a0c);color:#ffcf8a;border-color:#b5762e;}
+  .unit.enemy{
+    background:repeating-linear-gradient(45deg,#7a241c,#7a241c 6px,#8c2a20 6px,#8c2a20 12px);
+    color:#ffd9d4;border:1px solid #a83228;font-size:18px;
+  }
+  .unit.revealed{outline:2px solid var(--warn);}
+
+  /* Side panels */
+  .side{display:flex;flex-direction:column;gap:14px;width:300px;}
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    padding:14px;
+  }
+  .card h3{margin:0 0 10px;font-size:13px;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;}
+
+  .deck-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .deck-item{
+    background:var(--panel-2);border:1px solid var(--border);border-radius:8px;
+    padding:6px 2px;text-align:center;cursor:pointer;font-size:12px;font-weight:700;
+    position:relative;transition:transform .06s,border-color .1s;
+  }
+  .deck-item:hover{transform:translateY(-2px);}
+  .deck-item.star{color:var(--star);}
+  .deck-item.special{color:#cdbcff;}
+  .deck-item.selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(91,140,255,.4);}
+  .deck-item.depleted{opacity:.32;cursor:not-allowed;}
+  .deck-item .cnt{
+    position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;
+    border-radius:10px;font-size:10px;padding:0 5px;line-height:16px;min-width:16px;
+  }
+
+  .btn{
+    width:100%;padding:11px;border:none;border-radius:10px;font-weight:800;
+    font-size:14px;cursor:pointer;letter-spacing:1px;transition:filter .1s,opacity .1s;
+  }
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+  .btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;}
+  .btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--border);}
+  .btn:hover:not(:disabled){filter:brightness(1.1);}
+  .btn-row{display:flex;gap:8px;margin-top:8px;}
+
+  #log{
+    height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;
+    font-size:12px;line-height:1.5;padding-right:4px;
+  }
+  #log .entry{padding:6px 9px;border-radius:8px;background:var(--panel-2);border-left:3px solid var(--border);}
+  #log .entry.win{border-left-color:var(--good);}
+  #log .entry.lose{border-left-color:var(--bad);}
+  #log .entry.spy{border-left-color:var(--warn);background:#2c2410;}
+  #log .entry.sys{border-left-color:var(--accent);color:var(--text-dim);}
+  #log::-webkit-scrollbar{width:8px;}
+  #log::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+
+  .legend{font-size:11px;color:var(--text-dim);line-height:1.7;}
+  .legend b{color:var(--text);}
+
+  /* Modal */
+  .overlay{
+    position:fixed;inset:0;background:rgba(5,8,14,.78);backdrop-filter:blur(4px);
+    display:none;align-items:center;justify-content:center;z-index:50;
+  }
+  .overlay.show{display:flex;}
+  .modal{
+    background:var(--panel);border:1px solid var(--border);border-radius:18px;
+    padding:34px 40px;text-align:center;max-width:380px;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);
+  }
+  .modal h2{margin:0 0 8px;font-size:30px;}
+  .modal h2.win{color:var(--good);}
+  .modal h2.lose{color:var(--bad);}
+  .modal p{color:var(--text-dim);margin:0 0 22px;font-size:14px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>SUPER&nbsp;TACTICS / CHETICS</h1>
+  <p>블라인드 심리전 보드게임 · 싱글 플레이(AI 대전) 프로토타입</p>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: Deck / Controls -->
+  <div class="side">
+    <div class="card" id="setupCard">
+      <h3>배치 덱 (24 유닛)</h3>
+      <div class="deck-grid" id="deckGrid"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="autoBtn">자동 배치</button>
+        <button class="btn btn-ghost" id="clearBtn">초기화</button>
+      </div>
+      <button class="btn btn-primary" id="startBtn" style="margin-top:8px" disabled>게임 시작</button>
+    </div>
+    <div class="card">
+      <h3>유닛 상성 안내</h3>
+      <div class="legend">
+        <b>별 유닛</b>은 강력하나 <b>별킬러</b>에게 무조건 패배.<br>
+        <b>가스</b>(이동불가)는 부딪힌 유닛과 동귀어진, 단 <b>폭탄제거반</b>에게만 해체.<br>
+        <b>스파이</b>는 죽을 때 자신을 죽인 적의 정체를 폭로.<br>
+        <b>왕</b>(이동불가)은 모든 유닛에게 패배, 잡히면 게임 종료.<br>
+        Power 동점 시 <b>공격자(선공)</b>가 승리.
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: Board -->
+  <div class="board-area">
+    <div class="status-bar">
+      <span id="phaseText">배치 페이즈</span>
+      <span class="turn-pill" id="turnPill">대기</span>
+      <span id="counter" style="color:var(--text-dim)"></span>
+    </div>
+    <div id="board"></div>
+  </div>
+
+  <!-- RIGHT: Battle Log -->
+  <div class="side">
+    <div class="card">
+      <h3>전투 로그</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="modalTitle">승리</h2>
+    <p id="modalText"></p>
+    <button class="btn btn-primary" onclick="location.reload()">다시 하기</button>
+  </div>
+</div>
+
+<script>
+/* =================================================================
+   [1] CONFIG — 맵 / 유닛 설정 (확장성: 값만 바꾸면 변경 가능)
+   ================================================================= */
+
+// --- 맵 설정 ---
+const MAP_CONFIG = {
+  cols: 9,
+  rows: 10,
+  playerZoneRows: 3,   // 최하단 N줄이 플레이어 배치 구역
+  aiZoneRows: 3,       // 최상단 N줄이 AI 배치 구역
+  // 향후 장애물/추가 맵을 위한 자리 (예: blocked: [{r,c}])
+  blocked: [],
+};
+
+// --- 유닛 설정 (총 24마리 덱) ---
+// power: 내부 전투력 수치 (높을수록 강함). role: 특수 상성 키.
+// movable: 이동 가능 여부. isStar/isGas: 상성 판정 플래그.
+const UNIT_CONFIG = [
+  // 별 유닛 4 (별4가 가장 강함)
+  { key:'star4', label:'별4', power:16, count:1, isStar:true,  cls:'star' },
+  { key:'star3', label:'별3', power:15, count:1, isStar:true,  cls:'star' },
+  { key:'star2', label:'별2', power:14, count:1, isStar:true,  cls:'star' },
+  { key:'star1', label:'별1', power:13, count:1, isStar:true,  cls:'star' },
+  // 일반 숫자 유닛 12~1 (Power 12~1)
+  ...Array.from({length:12}, (_,i)=>{
+    const n = 12 - i;
+    return { key:'num'+n, label:String(n), power:n, count:1, cls:'num' };
+  }),
+  // 특수 유닛 서열
+  { key:'defuser',   label:'폭탄', power:0,  count:2, role:'defuser',   cls:'special' }, // 폭탄제거반: 가스만 이김
+  { key:'spy',       label:'스파이', power:-1, count:2, role:'spy',      cls:'special' }, // 사망 시 정체 폭로
+  { key:'starkiller',label:'별킬러', power:-2, count:1, role:'starkiller',cls:'special' },// 별 유닛 무조건 승
+  { key:'king',      label:'왕',  power:-3, count:1, role:'king',  movable:false, cls:'king' },   // 이동불가·모두에게 패배
+  { key:'gas',       label:'가스', power:null,count:2, role:'gas',  movable:false, isGas:true, cls:'special' }, // 이동불가·동귀어진
+];
+
+// 빠른 조회용 맵
+const UNIT_BY_KEY = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u]));
+function isMovableDef(def){ return def.movable !== false; }
+
+/* =================================================================
+   [3] GAME STATE — 모든 상태를 단일 객체로 관리 (네트워크 동기화 대비)
+   ================================================================= */
+const gameState = {
+  phase: 'setup',                 // 'setup' | 'playing' | 'over'
+  turn: null,                     // 'player' | 'ai'
+  board: [],                      // board[r][c] = unitObject | null
+  selected: null,                 // {r,c}
+  deckRemaining: {},              // { key: 남은 수 }  (배치 페이즈)
+  selectedDeckKey: null,          // 배치할 유닛 선택
+  aiPlaced: false,
+  winner: null,
+  unitSeq: 0,
+  log: [],
+};
+
+// 유닛 객체 생성기
+function makeUnit(def, owner){
+  return {
+    id: ++gameState.unitSeq,
+    key: def.key,
+    owner,                 // 'player' | 'ai'
+    label: def.label,
+    power: def.power,
+    role: def.role || null,
+    isStar: !!def.isStar,
+    isGas: !!def.isGas,
+    movable: isMovableDef(def),
+    cls: def.cls,
+    revealed: false,       // 적 유닛이 폭로되었는지 (블라인드 해제)
+  };
+}
+
+/* =================================================================
+   초기화
+   ================================================================= */
+function initGame(){
+  gameState.board = Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
+  gameState.deckRemaining = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u.count]));
+  buildDeckUI();
+  buildBoardUI();
+  log('유닛을 선택해 하단 3줄에 배치하세요. (24마리 / 3칸 여유)', 'sys');
+  render();
+}
+
+// 구역 판정
+function isPlayerZone(r){ return r >= MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows; }
+function isAIZone(r){ return r < MAP_CONFIG.aiZoneRows; }
+function inBounds(r,c){ return r>=0 && r<MAP_CONFIG.rows && c>=0 && c<MAP_CONFIG.cols; }
+
+/* =================================================================
+   UI 빌드 (정적 구조)
+   ================================================================= */
+const boardEl = document.getElementById('board');
+function buildBoardUI(){
+  boardEl.style.gridTemplateColumns = `repeat(${MAP_CONFIG.cols}, 48px)`;
+  boardEl.innerHTML = '';
+  for(let r=0;r<MAP_CONFIG.rows;r++){
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r; cell.dataset.c = c;
+      cell.addEventListener('click', ()=>onCellClick(r,c));
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function buildDeckUI(){
+  const grid = document.getElementById('deckGrid');
+  grid.innerHTML = '';
+  UNIT_CONFIG.forEach(def=>{
+    const item = document.createElement('div');
+    item.className = 'deck-item ' + (def.cls==='star'?'star':def.cls==='special'||def.cls==='king'?'special':'');
+    item.dataset.key = def.key;
+    item.innerHTML = `${def.label}<span class="cnt" data-cnt="${def.key}">${def.count}</span>`;
+    item.addEventListener('click', ()=>selectDeck(def.key));
+    grid.appendChild(item);
+  });
+}
+
+/* =================================================================
+   배치 페이즈 로직
+   ================================================================= */
+function selectDeck(key){
+  if(gameState.phase!=='setup') return;
+  if(gameState.deckRemaining[key] <= 0) return;
+  gameState.selectedDeckKey = (gameState.selectedDeckKey===key) ? null : key;
+  render();
+}
+
+function placeAIUnits(){
+  // AI 24마리를 상단 3줄에 랜덤 배치. '왕'/'가스'는 가급적 맨 윗줄(row 0) 깊숙이.
+  const cells = [];
+  for(let r=0;r<MAP_CONFIG.aiZoneRows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++) cells.push({r,c});
+
+  // 유닛 풀 생성
+  const pool = [];
+  UNIT_CONFIG.forEach(def=>{ for(let i=0;i<def.count;i++) pool.push(makeUnit(def,'ai')); });
+
+  // 숨길 유닛(왕/가스)과 일반 유닛 분리
+  const hide = pool.filter(u=>u.role==='king'||u.role==='gas');
+  const rest = pool.filter(u=>!(u.role==='king'||u.role==='gas'));
+
+  // 가중치: row 0(맨 위) 셀을 우선 hide 유닛에게 배정
+  const backCells = cells.filter(x=>x.r===0).sort(()=>Math.random()-0.5);
+  const otherCells = cells.filter(x=>x.r!==0).sort(()=>Math.random()-0.5);
+
+  hide.forEach(u=>{
+    const cell = backCells.length ? backCells.shift() : otherCells.shift();
+    gameState.board[cell.r][cell.c] = u;
+  });
+  const remainingCells = [...backCells, ...otherCells].sort(()=>Math.random()-0.5);
+  rest.forEach(u=>{ const cell = remainingCells.shift(); gameState.board[cell.r][cell.c] = u; });
+
+  gameState.aiPlaced = true;
+  log('AI가 24마리 유닛을 상단 진영에 비밀리에 배치했습니다.', 'sys');
+}
+
+function placedCount(){
+  return Object.entries(gameState.deckRemaining)
+    .reduce((s,[k,v])=>s + (UNIT_BY_KEY[k].count - v), 0);
+}
+
+function autoPlacePlayer(){
+  // 남은 플레이어 유닛을 빈 플레이어 구역에 랜덤 배치
+  if(!gameState.aiPlaced) placeAIUnits();
+  const empty = [];
+  for(let r=MAP_CONFIG.rows-MAP_CONFIG.playerZoneRows;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++) if(!gameState.board[r][c]) empty.push({r,c});
+  empty.sort(()=>Math.random()-0.5);
+  UNIT_CONFIG.forEach(def=>{
+    while(gameState.deckRemaining[def.key] > 0 && empty.length){
+      const cell = empty.shift();
+      gameState.board[cell.r][cell.c] = makeUnit(def,'player');
+      gameState.deckRemaining[def.key]--;
+    }
+  });
+  gameState.selectedDeckKey = null;
+  render();
+}
+
+function clearPlayer(){
+  for(let r=MAP_CONFIG.rows-MAP_CONFIG.playerZoneRows;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u = gameState.board[r][c];
+      if(u && u.owner==='player') gameState.board[r][c] = null;
+    }
+  gameState.deckRemaining = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u.count]));
+  gameState.selectedDeckKey = null;
+  render();
+}
+
+/* =================================================================
+   클릭 핸들러 (페이즈별 분기)
+   ================================================================= */
+function onCellClick(r,c){
+  if(gameState.phase==='setup') return onSetupClick(r,c);
+  if(gameState.phase==='playing') return onPlayClick(r,c);
+}
+
+function onSetupClick(r,c){
+  const cur = gameState.board[r][c];
+  // 이미 내 유닛이 있으면 -> 회수
+  if(cur && cur.owner==='player'){
+    gameState.deckRemaining[cur.key]++;
+    gameState.board[r][c] = null;
+    render();
+    return;
+  }
+  // 빈 플레이어 구역 -> 선택한 유닛 배치
+  if(!isPlayerZone(r)) return;
+  if(cur) return;
+  const key = gameState.selectedDeckKey;
+  if(!key || gameState.deckRemaining[key] <= 0) return;
+
+  if(!gameState.aiPlaced) placeAIUnits(); // 플레이어가 배치를 시작하면 AI도 배치
+
+  gameState.board[r][c] = makeUnit(UNIT_BY_KEY[key],'player');
+  gameState.deckRemaining[key]--;
+  if(gameState.deckRemaining[key]===0) gameState.selectedDeckKey = null;
+  render();
+}
+
+/* =================================================================
+   [2] 플레이 페이즈
+   ================================================================= */
+function startGame(){
+  if(placedCount() < 24) return;
+  if(!gameState.aiPlaced) placeAIUnits();
+  gameState.phase = 'playing';
+  gameState.selectedDeckKey = null;
+  // 선공/후공 랜덤
+  gameState.turn = Math.random() < 0.5 ? 'player' : 'ai';
+  log(`게임 시작! ${gameState.turn==='player'?'플레이어':'AI'} 선공.`, 'sys');
+  render();
+  if(gameState.turn==='ai') setTimeout(aiTurn, 800);
+}
+
+function onPlayClick(r,c){
+  if(gameState.turn!=='player') return;
+  const cell = gameState.board[r][c];
+
+  // 이동 대상 선택됨 + 목적지 클릭
+  if(gameState.selected){
+    const validMoves = getValidMoves(gameState.selected.r, gameState.selected.c);
+    if(validMoves.some(m=>m.r===r && m.c===c)){
+      doMove(gameState.selected, {r,c}, 'player');
+      gameState.selected = null;
+      render();
+      if(gameState.phase==='playing'){
+        gameState.turn = 'ai';
+        render();
+        setTimeout(aiTurn, 800);
+      }
+      return;
+    }
+  }
+
+  // 내 이동 가능 유닛 선택/해제
+  if(cell && cell.owner==='player' && cell.movable){
+    gameState.selected = (gameState.selected && gameState.selected.r===r && gameState.selected.c===c)
+      ? null : {r,c};
+  } else {
+    gameState.selected = null;
+  }
+  render();
+}
+
+// 상하좌우 1칸 (장애물/아군 칸 제외, 적 칸은 공격 가능)
+function getValidMoves(r,c){
+  const u = gameState.board[r][c];
+  if(!u || !u.movable) return [];
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  const moves = [];
+  for(const [dr,dc] of dirs){
+    const nr=r+dr, nc=c+dc;
+    if(!inBounds(nr,nc)) continue;
+    if(MAP_CONFIG.blocked.some(b=>b.r===nr&&b.c===nc)) continue;
+    const t = gameState.board[nr][nc];
+    if(t && t.owner===u.owner) continue; // 아군 칸 불가
+    moves.push({r:nr,c:nc,attack: !!t});
+  }
+  return moves;
+}
+
+/* =================================================================
+   ★ 핵심 전투 판정 ★
+   반환: 'attacker' | 'defender' | 'both'
+   ================================================================= */
+function resolveCombat(att, def){
+  // 1) 가스 상성 최우선 — 가스에 부딪히면 폭탄제거반만 해체, 그 외 동귀어진
+  if(def.isGas){
+    return (att.role==='defuser') ? 'attacker' : 'both';
+  }
+  if(att.isGas){ // 이론상 이동불가지만 대칭 처리
+    return (def.role==='defuser') ? 'defender' : 'both';
+  }
+  // 2) 왕은 모든 유닛에게 패배
+  if(def.role==='king') return 'attacker';
+  if(att.role==='king') return 'defender';
+  // 3) 별 유닛 vs 별킬러 — 별킬러 무조건 승리 (공/수 무관)
+  if(att.role==='starkiller' && def.isStar) return 'attacker';
+  if(def.role==='starkiller' && att.isStar) return 'defender';
+  // 4) 폭탄제거반 — 가스 외 모든 유닛에게 패배
+  if(att.role==='defuser') return 'defender';
+  if(def.role==='defuser') return 'attacker';
+  // 5) 일반 전투력 비교
+  if(att.power > def.power) return 'attacker';
+  if(att.power < def.power) return 'defender';
+  // 6) 동점 -> 공격자(선공) 필승
+  return 'attacker';
+}
+
+function doMove(from, to, mover){
+  const att = gameState.board[from.r][from.c];
+  const target = gameState.board[to.r][to.c];
+
+  // 단순 이동
+  if(!target){
+    gameState.board[to.r][to.c] = att;
+    gameState.board[from.r][from.c] = null;
+    return;
+  }
+
+  // 전투 발생
+  const result = resolveCombat(att, target);
+  const aName = unitName(att), dName = unitName(target);
+  const attTag = att.owner==='player'?'win':'lose';
+
+  if(result==='attacker'){
+    handleSpyReveal(target, att);            // 방어자(target)가 스파이면 폭로
+    if(target.role==='king') registerKingLoss(target.owner);
+    gameState.board[to.r][to.c] = att;
+    gameState.board[from.r][from.c] = null;
+    log(`${aName} ⚔ ${dName} → <b>${aName} 승리</b>`, att.owner==='player'?'win':'lose');
+  } else if(result==='defender'){
+    handleSpyReveal(att, target);            // 공격자가 스파이면 폭로
+    if(att.role==='king') registerKingLoss(att.owner);
+    gameState.board[from.r][from.c] = null;  // 공격자 소멸
+    target.revealed = true;                  // 막아낸 방어 유닛 정체 노출
+    log(`${aName} ⚔ ${dName} → <b>${dName} 승리</b>`, att.owner==='player'?'lose':'win');
+  } else { // both (동귀어진)
+    handleSpyReveal(att, target);
+    handleSpyReveal(target, att);
+    if(att.role==='king') registerKingLoss(att.owner);
+    if(target.role==='king') registerKingLoss(target.owner);
+    gameState.board[from.r][from.c] = null;
+    gameState.board[to.r][to.c] = null;
+    log(`${aName} ⚔ ${dName} → <b>동귀어진</b> (둘 다 소멸)`, 'sys');
+  }
+
+  checkWin();
+}
+
+// 스파이가 죽을 때 자신을 죽인 유닛의 정체 폭로
+function handleSpyReveal(dying, killer){
+  if(dying.role==='spy' && killer){
+    killer.revealed = true;
+    log(`💀 스파이(${dying.owner==='player'?'아군':'적'})가 쓰러지며 ${unitName(killer,true)}의 정체를 폭로!`, 'spy');
+  }
+}
+
+let kingLost = null;
+function registerKingLoss(owner){ kingLost = owner; }
+
+function unitName(u, forceReveal){
+  const side = u.owner==='player' ? '아군' : '적';
+  const known = u.owner==='player' || u.revealed || forceReveal;
+  return `${side} ${known ? u.label : '?'}`;
+}
+
+/* =================================================================
+   승리 조건 체크
+   ================================================================= */
+function checkWin(){
+  if(kingLost){
+    const loser = kingLost; kingLost = null;
+    return endGame(loser==='player'?'ai':'player', '왕 제거');
+  }
+  // 이동 가능 유닛 전멸 체크
+  const movable = {player:0, ai:0};
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u && u.movable) movable[u.owner]++;
+    }
+  if(movable.player===0) return endGame('ai','이동 가능 유닛 전멸');
+  if(movable.ai===0) return endGame('player','이동 가능 유닛 전멸');
+}
+
+function endGame(winner, reason){
+  gameState.phase='over';
+  gameState.winner=winner;
+  const win = winner==='player';
+  log(`${win?'플레이어':'AI'} 승리! (${reason})`, win?'win':'lose');
+  render();
+  const overlay=document.getElementById('overlay');
+  const title=document.getElementById('modalTitle');
+  title.textContent = win?'VICTORY':'DEFEAT';
+  title.className = win?'win':'lose';
+  document.getElementById('modalText').textContent =
+    (win?'적 진영을 무너뜨렸습니다.':'아군 진영이 무너졌습니다.') + ` — ${reason}`;
+  overlay.classList.add('show');
+}
+
+/* =================================================================
+   [2-4] AI 행동 로직
+   ================================================================= */
+function aiTurn(){
+  if(gameState.phase!=='playing' || gameState.turn!=='ai') return;
+
+  const myUnits = [];
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u && u.owner==='ai' && u.movable) myUnits.push({u,r,c});
+    }
+
+  // 플레이어 왕 위치(방어 판단용 — AI는 자기 왕 보호)
+  let myKing=null;
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u && u.owner==='ai' && u.role==='king') myKing={r,c};
+    }
+
+  const attacks=[];   // 1순위
+  const defenses=[];  // 2순위
+  const advances=[];  // 3순위
+
+  for(const {u,r,c} of myUnits){
+    for(const m of getValidMoves(r,c)){
+      const target = gameState.board[m.r][m.c];
+      if(target){
+        // 공격 후보 — 이기거나(공격자 승) 동귀어진으로 왕 등 가치 교환
+        const res = resolveCombat(u, target);
+        if(res==='attacker'){
+          const gain = target.role==='king'?1000:(target.power??5);
+          attacks.push({from:{r,c},to:{r:m.r,c:m.c},score:gain - u.power*0.01});
+        } else if(res==='both' && (target.role==='king')){
+          attacks.push({from:{r,c},to:{r:m.r,c:m.c},score:500});
+        }
+      } else {
+        // 방어: 내 왕 인접에 플레이어 유닛이 접근했는가
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)){
+          defenses.push({from:{r,c},to:{r:m.r,c:m.c},score:u.power});
+        }
+        // 전진: 플레이어 진영(아래쪽)으로 — 낮은 계급/스파이 우선
+        const towardScore = (m.r - r) + (u.role==='spy'?2:0) + (10-(u.power||0))*0.05;
+        advances.push({from:{r,c},to:{r:m.r,c:m.c},score:towardScore});
+      }
+    }
+  }
+
+  let choice=null;
+  if(attacks.length){
+    attacks.sort((a,b)=>b.score-a.score); choice=attacks[0];
+  } else if(defenses.length){
+    defenses.sort((a,b)=>b.score-a.score); choice=defenses[0];
+  } else if(advances.length){
+    // 약간의 무작위성 — 상위 후보 중 랜덤
+    advances.sort((a,b)=>b.score-a.score);
+    const top = advances.slice(0, Math.min(4,advances.length));
+    choice = top[Math.floor(Math.random()*top.length)];
+  }
+
+  if(choice){
+    doMove(choice.from, choice.to, 'ai');
+  } else {
+    log('AI가 움직일 수 없어 턴을 넘깁니다.', 'sys');
+  }
+
+  if(gameState.phase==='playing'){
+    gameState.turn='player';
+  }
+  render();
+}
+
+function isAdjacent(r1,c1,r2,c2){ return Math.abs(r1-r2)+Math.abs(c1-c2)===1; }
+function playerNear(pos){
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  return dirs.some(([dr,dc])=>{
+    const nr=pos.r+dr,nc=pos.c+dc;
+    return inBounds(nr,nc) && gameState.board[nr][nc] && gameState.board[nr][nc].owner==='player';
+  });
+}
+
+/* =================================================================
+   로그
+   ================================================================= */
+function log(msg, type='sys'){
+  gameState.log.push({msg,type});
+  const box=document.getElementById('log');
+  const div=document.createElement('div');
+  div.className='entry '+type;
+  div.innerHTML=msg;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+}
+
+/* =================================================================
+   RENDER — gameState만 보고 화면을 그림 (UI/로직 분리)
+   ================================================================= */
+function render(){
+  // 상태바
+  document.getElementById('phaseText').textContent =
+    gameState.phase==='setup' ? '배치 페이즈' :
+    gameState.phase==='playing' ? '플레이 페이즈' : '게임 종료';
+  const pill=document.getElementById('turnPill');
+  if(gameState.phase==='playing'){
+    pill.textContent = gameState.turn==='player'?'당신의 턴':'AI 턴';
+    pill.className='turn-pill '+(gameState.turn==='player'?'player':'ai');
+  } else {
+    pill.textContent = gameState.phase==='over'?'종료':'대기';
+    pill.className='turn-pill';
+  }
+  document.getElementById('counter').textContent =
+    gameState.phase==='setup' ? `배치 ${placedCount()}/24` : '';
+
+  // 덱 UI
+  document.querySelectorAll('.deck-item').forEach(item=>{
+    const key=item.dataset.key;
+    const rem=gameState.deckRemaining[key];
+    item.querySelector('.cnt').textContent=rem;
+    item.classList.toggle('depleted', rem<=0);
+    item.classList.toggle('selected', gameState.selectedDeckKey===key);
+  });
+  document.getElementById('startBtn').disabled = placedCount() < 24;
+  document.getElementById('setupCard').style.display =
+    gameState.phase==='setup' ? '' : 'none';
+
+  // 이동 가능 칸 계산
+  let hintCells=[];
+  if(gameState.phase==='playing' && gameState.selected){
+    hintCells=getValidMoves(gameState.selected.r,gameState.selected.c);
+  }
+
+  // 보드
+  const cells=boardEl.children;
+  for(let r=0;r<MAP_CONFIG.rows;r++){
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const cell=cells[r*MAP_CONFIG.cols+c];
+      cell.className='cell';
+      if(isPlayerZone(r)) cell.classList.add('zone-player');
+      else if(isAIZone(r)) cell.classList.add('zone-ai');
+
+      const u=gameState.board[r][c];
+      cell.innerHTML='';
+
+      // 배치 페이즈 — 배치 가능 표시
+      if(gameState.phase==='setup' && isPlayerZone(r) && !u && gameState.selectedDeckKey){
+        cell.classList.add('placeable');
+      }
+
+      // 유닛 렌더
+      if(u){
+        const div=document.createElement('div');
+        div.className='unit';
+        const known = u.owner==='player' || u.revealed;
+        if(u.owner==='player'){
+          div.classList.add('mine');
+          if(u.cls==='star') div.classList.add('star');
+          if(u.cls==='special'||u.role==='gas'||u.role==='defuser'||u.role==='spy'||u.role==='starkiller') div.classList.add('special');
+          if(u.role==='king') div.classList.add('king');
+          div.textContent=u.label;
+        } else if(known){
+          div.classList.add('mine');
+          if(u.cls==='star') div.classList.add('star'); else div.classList.add('special');
+          div.classList.add('revealed');
+          div.textContent=u.label;
+        } else {
+          div.classList.add('enemy');
+          div.textContent='?';
+        }
+        cell.appendChild(div);
+
+        if(gameState.phase==='setup' && u.owner==='player') cell.classList.add('clickable');
+        if(gameState.phase==='playing' && u.owner==='player' && u.movable && gameState.turn==='player')
+          cell.classList.add('clickable');
+      }
+
+      // 선택/이동 힌트
+      if(gameState.selected && gameState.selected.r===r && gameState.selected.c===c)
+        cell.classList.add('selected');
+      const hint=hintCells.find(m=>m.r===r&&m.c===c);
+      if(hint) cell.classList.add(hint.attack?'attackhint':'movehint');
+    }
+  }
+}
+
+/* =================================================================
+   이벤트 바인딩
+   ================================================================= */
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('autoBtn').addEventListener('click', autoPlacePlayer);
+document.getElementById('clearBtn').addEventListener('click', clearPlayer);
+
+initGame();
+</script>
+</body>
+</html>
