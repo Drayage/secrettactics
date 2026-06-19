@@ -463,6 +463,11 @@ function totalUnits(){ return UNIT_CONFIG.reduce((s,u)=>s+u.count,0); }
 const UNIT_BY_KEY = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u]));
 function isMovableDef(def){ return def.movable !== false; }
 
+// 특수유닛 서열 (강함 → 약함). 특수유닛끼리 붙으면 이 서열로 승패가 결정됨.
+// (폭탄 해체, 별킬러의 별 격파는 별도 특수룰로 우선 처리)
+const SPECIAL_ORDER = ['defuser','spy','starkiller','king'];
+const SPECIAL_RANK = Object.fromEntries(SPECIAL_ORDER.map((k,i)=>[k, SPECIAL_ORDER.length - i]));
+
 /* =================================================================
    [확장] 새 게임 설정 — 맵 크기 / 장애물 / 특수 유닛 갯수
    ================================================================= */
@@ -868,11 +873,17 @@ function resolveCombat(att, def){
   // 3) 별 유닛 vs 별킬러 — 별킬러 무조건 승리 (공/수 무관)
   if(att.role==='starkiller' && def.isStar) return 'attacker';
   if(def.role==='starkiller' && att.isStar) return 'defender';
-  // 4) 일반 전투력 비교 (특수유닛 서열 제거반0 > 스파이-1 > 별킬러-2 > 왕-3 도 이 비교를 따름)
-  //    제거반(0)은 일반 숫자(1~9)·별엔 어차피 지고, 특수유닛에겐 이긴다.
+  // 4) 특수유닛끼리(제거반·스파이·별킬러·왕) — 명시적 서열로 판정 (별킬러 포함)
+  const ar = SPECIAL_RANK[att.role], dr = SPECIAL_RANK[def.role];
+  if(ar && dr){
+    if(ar > dr) return 'attacker';
+    if(ar < dr) return 'defender';
+    return 'attacker';                 // 같은 특수유닛끼리 동점 -> 공격자
+  }
+  // 5) 일반 전투력 비교 (특수유닛 vs 일반: 제거반0은 숫자1~9·별엔 패배)
   if(att.power > def.power) return 'attacker';
   if(att.power < def.power) return 'defender';
-  // 5) 동점 -> 공격자(선공) 필승
+  // 6) 동점 -> 공격자(선공) 필승
   return 'attacker';
 }
 
