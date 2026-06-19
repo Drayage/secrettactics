@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2233"/>
+      <stop offset="1" stop-color="#0d1017"/>
+    </linearGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe79a"/>
+      <stop offset="1" stop-color="#f2b736"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b8cff"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+  </defs>
+  <!-- maskable safe area: keep art within central 80% -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="url(#ring)" stroke-width="14" opacity="0.9"/>
+  <circle cx="256" cy="256" r="150" fill="#151a23"/>
+  <!-- star -->
+  <path fill="url(#star)" stroke="#9a6a12" stroke-width="6" stroke-linejoin="round"
+    d="M256 132 l34 70 77 11 -56 54 13 77 -68 -36 -69 36 13 -77 -56 -54 78 -11 z"/>
+  <!-- crossed sabers hint -->
+  <g stroke="#cdbcff" stroke-width="10" stroke-linecap="round" opacity="0.85">
+    <line x1="170" y1="350" x2="342" y2="350"/>
+  </g>
+  <text x="256" y="408" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif"
+    font-size="44" font-weight="800" fill="#9fb2d8">TACTICS</text>
+</svg>

@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "seats": {
+          ".validate": true
+        },
+        ".validate": "newData.hasChildren(['status']) || data.exists()"
+      }
+    }
+  }
+}

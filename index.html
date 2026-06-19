@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SUPER TACTICS / CHETICS — 블라인드 심리전</title>
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d1017">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   /* ============================================================
      THEME (Dark / Modern)
@@ -112,6 +119,13 @@
     background:linear-gradient(160deg,#9c2b22,#6e1d17);
     border:2px solid var(--warn);color:#ffe8d6;
   }
+  /* 내 유닛이 적 스파이를 잡아 정체가 상대에게 노출됨 */
+  .unit.mine.exposed{box-shadow:inset 0 0 0 2px var(--warn);position:relative;}
+  .unit.mine.exposed::after{
+    content:"👁";position:absolute;top:-6px;right:-5px;font-size:calc(var(--cs)*0.3);
+    background:#13233a;border-radius:50%;line-height:1;padding:1px 2px;
+    border:1px solid var(--warn);
+  }
 
   /* Side panels */
   .side{display:flex;flex-direction:column;gap:14px;width:300px;}
@@ -195,6 +209,25 @@
   .set-note{font-size:11px;color:var(--text-dim);margin-top:4px;}
   .set-note.warn{color:var(--warn);}
 
+  /* Mode / Lobby */
+  .modal.menu{text-align:center;max-width:380px;width:90vw;}
+  .modal.menu .btn{margin-top:10px;}
+  .lobby-tabs{display:flex;gap:8px;margin-bottom:12px;}
+  .lobby-tabs button{flex:1;padding:8px;border-radius:9px;border:1px solid var(--border);
+    background:var(--panel-2);color:var(--text-dim);font-weight:800;cursor:pointer;}
+  .lobby-tabs button.active{color:#fff;border-color:var(--accent);background:#23335a;}
+  .lobby-pane{display:none;}
+  .lobby-pane.active{display:block;}
+  .room-code{font-size:30px;font-weight:900;letter-spacing:6px;text-align:center;
+    color:var(--accent);background:var(--panel-2);border:1px dashed var(--border);
+    border-radius:12px;padding:14px;margin:10px 0;}
+  .code-input{width:100%;padding:12px;border-radius:10px;background:var(--panel-2);
+    color:var(--text);border:1px solid var(--border);font-size:22px;letter-spacing:6px;
+    text-align:center;text-transform:uppercase;font-weight:800;}
+  .lobby-note{font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.6;}
+  .lobby-note.warn{color:var(--warn);}
+  .online-badge{font-size:11px;color:var(--accent);font-weight:800;}
+
   /* Mobile */
   @media (max-width: 760px){
     .wrap{gap:12px;padding:10px;}
@@ -232,7 +265,8 @@
         <b>🕵️ 스파이</b>는 죽을 때 자신을 죽인 적의 정체를 폭로.<br>
         <b>👑 왕</b>(이동불가)은 모든 유닛에게 패배, 잡히면 게임 종료.<br>
         Power 동점 시 <b>공격자(선공)</b>가 승리.<br>
-        방금 움직인 유닛은 다음 턴에 같은 칸으로 <b>되돌아갈 수 없음</b>.
+        방금 움직인 유닛은 다음 턴에 같은 칸으로 <b>되돌아갈 수 없음</b>.<br>
+        내 유닛이 적 스파이를 처치하면 <b>👁</b>로 표시 — 정체가 상대에게 <b>노출</b>됨.
       </div>
     </div>
   </div>
@@ -243,6 +277,7 @@
       <span id="phaseText">배치 페이즈</span>
       <span class="turn-pill" id="turnPill">대기</span>
       <span id="counter" style="color:var(--text-dim)"></span>
+      <span id="onlineInfo" class="online-badge"></span>
     </div>
     <div id="board"></div>
   </div>
@@ -287,6 +322,102 @@
     </div>
   </div>
 </div>
+
+<!-- 모드 선택 -->
+<div class="overlay show" id="modeOverlay">
+  <div class="modal menu">
+    <h2>게임 모드</h2>
+    <p>블라인드 심리전을 시작하세요.</p>
+    <button class="btn btn-primary" id="modeSingle">🤖 싱글 (AI 대전)</button>
+    <button class="btn btn-ghost" id="modeOnline">🌐 온라인 대전 (2인)</button>
+    <button class="btn btn-ghost" id="modeConfig">⚙ 게임 설정</button>
+  </div>
+</div>
+
+<!-- 온라인 로비 -->
+<div class="overlay" id="lobbyOverlay">
+  <div class="modal menu">
+    <h2>온라인 대전</h2>
+    <div class="lobby-tabs">
+      <button id="tabCreate" class="active">방 만들기</button>
+      <button id="tabJoin">방 참가</button>
+    </div>
+
+    <div class="lobby-pane active" id="paneCreate">
+      <div class="set-row" style="text-align:left">
+        <label>맵 크기</label>
+        <select class="set-select" id="lobbyMap"></select>
+      </div>
+      <div class="set-row" style="text-align:left">
+        <label>장애물</label>
+        <select class="set-select" id="lobbyObstacle"></select>
+      </div>
+      <button class="btn btn-primary" id="createRoomBtn">방 생성</button>
+      <div id="createWait" style="display:none">
+        <div class="lobby-note">상대에게 이 코드를 공유하세요</div>
+        <div class="room-code" id="roomCodeText">-----</div>
+        <div class="lobby-note" id="createStatus">상대 입장 대기 중…</div>
+      </div>
+    </div>
+
+    <div class="lobby-pane" id="paneJoin">
+      <input class="code-input" id="joinCodeInput" maxlength="5" placeholder="CODE">
+      <button class="btn btn-primary" id="joinRoomBtn" style="margin-top:10px">참가</button>
+      <div class="lobby-note" id="joinStatus"></div>
+    </div>
+
+    <div class="lobby-note warn" id="fbWarn" style="display:none">
+      ⚠ Firebase 설정이 필요합니다. index.html 상단의 <b>FIREBASE_CONFIG</b>를 채워주세요.
+    </div>
+    <div class="lobby-note">⚠ 블라인드 anti-cheat는 신뢰 기반(프로토타입): DB를 직접 열람하면 상대 배치가 보일 수 있습니다.</div>
+    <button class="btn btn-ghost" id="lobbyBack" style="margin-top:10px">← 뒤로</button>
+  </div>
+</div>
+
+<!-- Firebase SDK + 플러밍 (모듈) -->
+<script type="module">
+  /* ===========================================================
+     ▼▼▼ 여기에 Firebase 웹 설정을 붙여넣으세요 (공개값이라 비밀 아님) ▼▼▼
+     Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹) → SDK 설정/구성
+     기존 프로젝트 재사용 가능: 웹 앱 1개 + Realtime Database만 추가하면 됩니다.
+     databaseURL 이 반드시 포함되어야 합니다 (RTDB).
+     =========================================================== */
+  const FIREBASE_CONFIG = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT",
+    appId: "YOUR_APP_ID"
+  };
+
+  let _app,_db,_auth,_uid;
+  const configured = ()=> FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+  window.MP = {
+    configured,
+    async init(){
+      if(_app) return;
+      const [{initializeApp},{getDatabase,ref,set,update,get,onValue,onDisconnect},{getAuth,signInAnonymously}] =
+        await Promise.all([
+          import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
+          import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js'),
+          import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
+        ]);
+      _app = initializeApp(FIREBASE_CONFIG);
+      _db = getDatabase(_app);
+      _auth = getAuth(_app);
+      await signInAnonymously(_auth);
+      _uid = _auth.currentUser.uid;
+      window.MP._ref = (p)=>ref(_db,p);
+      window.MP._set = (p,v)=>set(ref(_db,p),v);
+      window.MP._update = (p,v)=>update(ref(_db,p),v);
+      window.MP._get = async (p)=>(await get(ref(_db,p))).val();
+      window.MP._onValue = (p,cb)=>onValue(ref(_db,p),s=>cb(s.val()));
+      window.MP._onDisconnectRemove = (p)=>onDisconnect(ref(_db,p)).remove();
+    },
+    uid(){ return _uid; },
+  };
+</script>
 
 <script>
 /* =================================================================
@@ -414,9 +545,9 @@ function applyGameSettings(){
    ================================================================= */
 const gameState = {
   phase: 'setup',                 // 'setup' | 'playing' | 'over'
-  turn: null,                     // 'player' | 'ai'
+  turn: null,                     // 'player' | 'ai'  (캔오니컬 진영)
   board: [],                      // board[r][c] = unitObject | null
-  selected: null,                 // {r,c}
+  selected: null,                 // {r,c}  (캔오니컬 좌표)
   deckRemaining: {},              // { key: 남은 수 }  (배치 페이즈)
   selectedDeckKey: null,          // 배치할 유닛 선택
   aiPlaced: false,
@@ -425,7 +556,23 @@ const gameState = {
   log: [],
   // 바로 직전에 이동한 유닛 (되돌아가기 금지 + 테두리 강조)
   lastMove: { player:null, ai:null }, // { unitId, fromR, fromC }
+  // --- 멀티플레이/모드 ---
+  mode: 'ai',                     // 'ai' | 'online'
+  mySide: 'player',               // 이 클라이언트가 조작하는 캔오니컬 진영
+  seq: 0,                         // 상태 버전(원격 에코 방지)
+  online: null,                   // { code, role:'host'|'guest' }
 };
+
+// 진영 헬퍼 (player=하단/호스트, ai=상단/게스트)
+function opponentSide(side){ return side==='player' ? 'ai' : 'player'; }
+// 캔오니컬 진영의 배치 구역 판정
+function isZoneOf(side, r){ return side==='player' ? isPlayerZone(r) : isAIZone(r); }
+// 뷰 좌표 ↔ 캔오니컬 좌표 (게스트=ai 시점이면 180° 회전, 자기 말이 하단에 보이도록)
+function transformRC(r,c){
+  return gameState.mySide==='player'
+    ? { r, c }
+    : { r: MAP_CONFIG.rows-1-r, c: MAP_CONFIG.cols-1-c };
+}
 
 // 유닛 객체 생성기
 function makeUnit(def, owner){
@@ -455,14 +602,19 @@ function initGame(){
   gameState.selectedDeckKey = null;
   gameState.aiPlaced = false;
   gameState.winner = null;
+  gameState.winReason = null;
+  gameState.seq = 0;
   gameState.lastMove = { player:null, ai:null };
+  gameState.log = [];
   gameState.board = Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
   gameState.deckRemaining = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u.count]));
   buildDeckUI();
   buildBoardUI();
   sizeBoard();
+  renderLog();
+  const zoneWord = gameState.mySide==='player' ? '하단' : '상단';
   const spare = MAP_CONFIG.playerZoneRows*MAP_CONFIG.cols - totalUnits();
-  log(`유닛을 선택해 하단 ${MAP_CONFIG.playerZoneRows}줄에 배치하세요. (${totalUnits()}마리 / ${spare}칸 여유)`, 'sys');
+  log(`유닛을 선택해 내 진영(${MAP_CONFIG.playerZoneRows}줄, 화면 하단)에 배치하세요. (${totalUnits()}마리 / ${spare}칸 여유)`, 'sys');
   render();
 }
 
@@ -560,16 +712,18 @@ function placedCount(){
 }
 
 function autoPlacePlayer(){
-  // 남은 플레이어 유닛을 빈 플레이어 구역에 랜덤 배치
-  if(!gameState.aiPlaced) placeAIUnits();
+  // 남은 내 유닛을 빈 내 진영에 랜덤 배치
+  const me = gameState.mySide;
+  if(gameState.mode==='ai' && !gameState.aiPlaced) placeAIUnits();
   const empty = [];
-  for(let r=MAP_CONFIG.rows-MAP_CONFIG.playerZoneRows;r<MAP_CONFIG.rows;r++)
-    for(let c=0;c<MAP_CONFIG.cols;c++) if(!gameState.board[r][c] && !isBlocked(r,c)) empty.push({r,c});
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++)
+      if(isZoneOf(me,r) && !gameState.board[r][c] && !isBlocked(r,c)) empty.push({r,c});
   empty.sort(()=>Math.random()-0.5);
   UNIT_CONFIG.forEach(def=>{
     while(gameState.deckRemaining[def.key] > 0 && empty.length){
       const cell = empty.shift();
-      gameState.board[cell.r][cell.c] = makeUnit(def,'player');
+      gameState.board[cell.r][cell.c] = makeUnit(def, me);
       gameState.deckRemaining[def.key]--;
     }
   });
@@ -578,10 +732,11 @@ function autoPlacePlayer(){
 }
 
 function clearPlayer(){
-  for(let r=MAP_CONFIG.rows-MAP_CONFIG.playerZoneRows;r<MAP_CONFIG.rows;r++)
+  const me = gameState.mySide;
+  for(let r=0;r<MAP_CONFIG.rows;r++)
     for(let c=0;c<MAP_CONFIG.cols;c++){
       const u = gameState.board[r][c];
-      if(u && u.owner==='player') gameState.board[r][c] = null;
+      if(u && u.owner===me) gameState.board[r][c] = null;
     }
   gameState.deckRemaining = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u.count]));
   gameState.selectedDeckKey = null;
@@ -591,29 +746,33 @@ function clearPlayer(){
 /* =================================================================
    클릭 핸들러 (페이즈별 분기)
    ================================================================= */
-function onCellClick(r,c){
+function onCellClick(vr,vc){
+  // 클릭은 뷰 좌표 → 캔오니컬 좌표로 변환
+  const {r,c}=transformRC(vr,vc);
   if(gameState.phase==='setup') return onSetupClick(r,c);
   if(gameState.phase==='playing') return onPlayClick(r,c);
 }
 
 function onSetupClick(r,c){
+  const me = gameState.mySide;
   const cur = gameState.board[r][c];
   // 이미 내 유닛이 있으면 -> 회수
-  if(cur && cur.owner==='player'){
+  if(cur && cur.owner===me){
     gameState.deckRemaining[cur.key]++;
     gameState.board[r][c] = null;
     render();
     return;
   }
-  // 빈 플레이어 구역 -> 선택한 유닛 배치
-  if(!isPlayerZone(r) || isBlocked(r,c)) return;
+  // 빈 내 진영 칸 -> 선택한 유닛 배치
+  if(!isZoneOf(me,r) || isBlocked(r,c)) return;
   if(cur) return;
   const key = gameState.selectedDeckKey;
   if(!key || gameState.deckRemaining[key] <= 0) return;
 
-  if(!gameState.aiPlaced) placeAIUnits(); // 플레이어가 배치를 시작하면 AI도 배치
+  // AI 모드: 플레이어가 배치를 시작하면 AI도 배치 (온라인은 각자 배치)
+  if(gameState.mode==='ai' && !gameState.aiPlaced) placeAIUnits();
 
-  gameState.board[r][c] = makeUnit(UNIT_BY_KEY[key],'player');
+  gameState.board[r][c] = makeUnit(UNIT_BY_KEY[key], me);
   gameState.deckRemaining[key]--;
   if(gameState.deckRemaining[key]===0) gameState.selectedDeckKey = null;
   render();
@@ -624,6 +783,7 @@ function onSetupClick(r,c){
    ================================================================= */
 function startGame(){
   if(placedCount() < totalUnits()) return;
+  if(gameState.mode==='online') return onlineReady();   // 온라인은 '준비완료'로 처리
   if(!gameState.aiPlaced) placeAIUnits();
   gameState.phase = 'playing';
   gameState.selectedDeckKey = null;
@@ -635,19 +795,21 @@ function startGame(){
 }
 
 function onPlayClick(r,c){
-  if(gameState.turn!=='player') return;
+  const me = gameState.mySide;
+  if(gameState.turn!==me) return;        // 내 턴이 아니면 입력 잠금
   const cell = gameState.board[r][c];
 
   // 이동 대상 선택됨 + 목적지 클릭
   if(gameState.selected){
     const validMoves = getValidMoves(gameState.selected.r, gameState.selected.c);
     if(validMoves.some(m=>m.r===r && m.c===c)){
-      doMove(gameState.selected, {r,c}, 'player');
+      doMove(gameState.selected, {r,c}, me);
       gameState.selected = null;
+      if(gameState.phase==='playing') gameState.turn = opponentSide(me);
       render();
-      if(gameState.phase==='playing'){
-        gameState.turn = 'ai';
-        render();
+      if(gameState.mode==='online'){
+        if(gameState.phase==='playing') pushState();  // 게임오버는 endGame이 이미 동기화
+      } else if(gameState.phase==='playing' && gameState.turn==='ai'){
         setTimeout(aiTurn, 800);
       }
       return;
@@ -655,7 +817,7 @@ function onPlayClick(r,c){
   }
 
   // 내 이동 가능 유닛 선택/해제
-  if(cell && cell.owner==='player' && cell.movable){
+  if(cell && cell.owner===me && cell.movable){
     gameState.selected = (gameState.selected && gameState.selected.r===r && gameState.selected.c===c)
       ? null : {r,c};
   } else {
@@ -732,9 +894,9 @@ function doMove(from, to, mover){
     return;
   }
 
-  // 전투 발생
+  // 전투 발생 — 전투가 일어나면 양측 모두 두 유닛의 계급을 알게 됨(정통 룰)
   const result = resolveCombat(att, target);
-  const aName = unitName(att), dName = unitName(target);
+  const aName = nm(att), dName = nm(target);
 
   if(result==='attacker'){
     handleSpyReveal(target, att);            // 방어자(target)가 스파이면 폭로
@@ -742,14 +904,14 @@ function doMove(from, to, mover){
     gameState.board[to.r][to.c] = att;
     gameState.board[from.r][from.c] = null;
     recordMove(true);
-    log(`${aName} ⚔ ${dName} → <b>${aName} 승리</b>`, att.owner==='player'?'win':'lose');
+    log(`${aName} ⚔ ${dName} → <b>${aName} 승리</b>`, 'combat', att.owner);
   } else if(result==='defender'){
     handleSpyReveal(att, target);            // 공격자가 스파이면 폭로
     if(att.role==='king') registerKingLoss(att.owner);
     gameState.board[from.r][from.c] = null;  // 공격자 소멸
     target.revealed = true;                  // 막아낸 방어 유닛 정체 노출
     recordMove(false);
-    log(`${aName} ⚔ ${dName} → <b>${dName} 승리</b>`, att.owner==='player'?'lose':'win');
+    log(`${aName} ⚔ ${dName} → <b>${dName} 승리</b>`, 'combat', target.owner);
   } else { // both (양쪽 소멸)
     handleSpyReveal(att, target);
     handleSpyReveal(target, att);
@@ -764,22 +926,19 @@ function doMove(from, to, mover){
   checkWin();
 }
 
+// 로그용 유닛 표기: @<side> <label> (렌더 시 시점에 맞춰 아군/상대로 치환)
+function nm(u){ return `@${u.owner} ${u.label}`; }
+
 // 스파이가 죽을 때 자신을 죽인 유닛의 정체 폭로
 function handleSpyReveal(dying, killer){
   if(dying.role==='spy' && killer){
     killer.revealed = true;
-    log(`💀 스파이(${dying.owner==='player'?'아군':'적'})가 쓰러지며 ${unitName(killer,true)}의 정체를 폭로!`, 'spy');
+    log(`💀 @${dying.owner} 스파이가 쓰러지며 ${nm(killer)}의 정체를 폭로!`, 'spy');
   }
 }
 
 let kingLost = null;
 function registerKingLoss(owner){ kingLost = owner; }
-
-function unitName(u, forceReveal){
-  const side = u.owner==='player' ? '아군' : '적';
-  const known = u.owner==='player' || u.revealed || forceReveal;
-  return `${side} ${known ? u.label : '?'}`;
-}
 
 /* =================================================================
    승리 조건 체크
@@ -803,15 +962,22 @@ function checkWin(){
 function endGame(winner, reason){
   gameState.phase='over';
   gameState.winner=winner;
-  const win = winner==='player';
-  log(`${win?'플레이어':'AI'} 승리! (${reason})`, win?'win':'lose');
+  gameState.winReason=reason;
+  log(`@${winner} 승리! (${reason})`, 'sys', winner);
+  if(gameState.mode==='online') pushState();   // 결과 동기화
   render();
+  showResult();
+}
+
+// 결과 팝업 (내 시점 기준) — 원격 수신 시에도 동일 함수 사용
+function showResult(){
+  const win = gameState.winner===gameState.mySide;
   const overlay=document.getElementById('overlay');
   const title=document.getElementById('modalTitle');
   title.textContent = win?'VICTORY':'DEFEAT';
   title.className = win?'win':'lose';
   document.getElementById('modalText').textContent =
-    (win?'적 진영을 무너뜨렸습니다.':'아군 진영이 무너졌습니다.') + ` — ${reason}`;
+    (win?'상대 진영을 무너뜨렸습니다.':'내 진영이 무너졌습니다.') + ` — ${gameState.winReason||''}`;
   overlay.classList.add('show');
 }
 
@@ -900,14 +1066,32 @@ function playerNear(pos){
 /* =================================================================
    로그
    ================================================================= */
-function log(msg, type='sys'){
-  gameState.log.push({msg,type});
+// type: 'sys'|'spy'|'combat'  /  side: 유리한 진영(승패 색상 시점화용, 선택)
+function log(msg, type='sys', side=null){
+  const entry={msg,type,side};
+  gameState.log.push(entry);
+  if(gameState.log.length>60) gameState.log.shift();
+  appendLogEntry(entry);
+}
+// 로그 한 줄을 내 시점으로 치환해 DOM에 추가
+function appendLogEntry(entry){
   const box=document.getElementById('log');
   const div=document.createElement('div');
-  div.className='entry '+type;
-  div.innerHTML=msg;
+  let cls='entry '+(entry.type==='combat'?'':entry.type);
+  if(entry.side) cls+=' '+(entry.side===gameState.mySide?'win':'lose');
+  div.className=cls.trim();
+  // @player/@ai → 내 시점(아군/상대)으로 치환
+  div.innerHTML=entry.msg
+    .replace(new RegExp('@'+gameState.mySide,'g'),'아군')
+    .replace(new RegExp('@'+opponentSide(gameState.mySide),'g'),'상대');
   box.appendChild(div);
   box.scrollTop=box.scrollHeight;
+}
+// 전체 로그를 내 시점으로 다시 그림 (원격 동기화 후)
+function renderLog(){
+  const box=document.getElementById('log');
+  box.innerHTML='';
+  gameState.log.forEach(appendLogEntry);
 }
 
 /* =================================================================
@@ -919,9 +1103,11 @@ function render(){
     gameState.phase==='setup' ? '배치 페이즈' :
     gameState.phase==='playing' ? '플레이 페이즈' : '게임 종료';
   const pill=document.getElementById('turnPill');
+  const myTurn = gameState.turn===gameState.mySide;
   if(gameState.phase==='playing'){
-    pill.textContent = gameState.turn==='player'?'당신의 턴':'AI 턴';
-    pill.className='turn-pill '+(gameState.turn==='player'?'player':'ai');
+    const oppLabel = gameState.mode==='ai' ? 'AI' : '상대';
+    pill.textContent = myTurn ? '당신의 턴' : `${oppLabel} 턴`;
+    pill.className='turn-pill '+(myTurn?'player':'ai');
   } else {
     pill.textContent = gameState.phase==='over'?'종료':'대기';
     pill.className='turn-pill';
@@ -954,21 +1140,24 @@ function render(){
     hintCells=getValidMoves(gameState.selected.r,gameState.selected.c);
   }
 
-  // 보드
+  // 보드 — 뷰 좌표(vr,vc)로 순회하고 캔오니컬 좌표로 변환해 그림
+  const me = gameState.mySide, opp = opponentSide(me);
+  const myTurn2 = gameState.turn===me;
   const cells=boardEl.children;
-  for(let r=0;r<MAP_CONFIG.rows;r++){
-    for(let c=0;c<MAP_CONFIG.cols;c++){
-      const cell=cells[r*MAP_CONFIG.cols+c];
+  for(let vr=0;vr<MAP_CONFIG.rows;vr++){
+    for(let vc=0;vc<MAP_CONFIG.cols;vc++){
+      const cell=cells[vr*MAP_CONFIG.cols+vc];
       cell.className='cell';
+      const {r,c}=transformRC(vr,vc);
       if(isBlocked(r,c)){ cell.classList.add('blocked'); cell.innerHTML=''; continue; }
-      if(isPlayerZone(r)) cell.classList.add('zone-player');
-      else if(isAIZone(r)) cell.classList.add('zone-ai');
+      if(isZoneOf(me,r)) cell.classList.add('zone-player');       // 내 진영 = 하단(뷰)
+      else if(isZoneOf(opp,r)) cell.classList.add('zone-ai');     // 상대 진영 = 상단(뷰)
 
       const u=gameState.board[r][c];
       cell.innerHTML='';
 
-      // 배치 페이즈 — 배치 가능 표시
-      if(gameState.phase==='setup' && isPlayerZone(r) && !u && gameState.selectedDeckKey){
+      // 배치 페이즈 — 내 진영 빈칸에 배치 가능 표시
+      if(gameState.phase==='setup' && isZoneOf(me,r) && !u && gameState.selectedDeckKey){
         cell.classList.add('placeable');
       }
 
@@ -976,32 +1165,34 @@ function render(){
       if(u){
         const div=document.createElement('div');
         div.className='unit';
-        const known = u.owner==='player' || u.revealed;
-        if(u.owner==='player'){
+        const mine = u.owner===me;
+        if(mine){
           // 내 유닛: 알록달록 (계급별 색)
           div.classList.add('mine');
           if(u.cls==='star') div.classList.add('star');
           else if(u.role==='king') div.classList.add('king');
           else if(u.cls==='special') div.classList.add('special');
           div.textContent=u.icon;
+          // 적 스파이를 잡아 내 정체가 상대에게 노출된 유닛 표시
+          if(u.revealed) div.classList.add('exposed');
         } else {
-          // 적 유닛: 항상 빨간색 고정. 드러나면 아이콘 공개, 아니면 ?
+          // 상대 유닛: 항상 빨간색 고정. 내게 드러났으면 아이콘 공개, 아니면 ?
           div.classList.add('enemy');
-          if(known){ div.classList.add('revealed'); div.textContent=u.icon; }
+          if(u.revealed){ div.classList.add('revealed'); div.textContent=u.icon; }
           else div.textContent='?';
         }
         cell.appendChild(div);
 
-        // 직전 턴 이동 유닛 테두리 강조 (양 진영)
-        if(u.id===lastIds.player) cell.classList.add('lastmine');
-        else if(u.id===lastIds.ai) cell.classList.add('lastai');
+        // 직전 턴 이동 유닛 테두리 강조 (내 것 초록 / 상대 빨강)
+        if(u.id===lastIds[me]) cell.classList.add('lastmine');
+        else if(u.id===lastIds[opp]) cell.classList.add('lastai');
 
-        if(gameState.phase==='setup' && u.owner==='player') cell.classList.add('clickable');
-        if(gameState.phase==='playing' && u.owner==='player' && u.movable && gameState.turn==='player')
+        if(gameState.phase==='setup' && mine) cell.classList.add('clickable');
+        if(gameState.phase==='playing' && mine && u.movable && myTurn2)
           cell.classList.add('clickable');
       }
 
-      // 선택/이동 힌트
+      // 선택/이동 힌트 (캔오니컬 → 현재 셀과 비교)
       if(gameState.selected && gameState.selected.r===r && gameState.selected.c===c)
         cell.classList.add('selected');
       const hint=hintCells.find(m=>m.r===r&&m.c===c);
@@ -1015,7 +1206,10 @@ function render(){
    ================================================================= */
 let draftSettings = null; // 설정창에서 편집 중인 임시 값
 
-function openSettings(){
+let _settingsFromMenu=false;
+function openSettings(fromMenu){
+  _settingsFromMenu = fromMenu===true;
+  if(_settingsFromMenu) document.getElementById('modeOverlay').classList.remove('show');
   draftSettings = JSON.parse(JSON.stringify(GAME_SETTINGS));
   // 맵 셀렉트
   const mapSel=document.getElementById('setMap');
@@ -1029,7 +1223,10 @@ function openSettings(){
   refreshCapNote();
   document.getElementById('settingsOverlay').classList.add('show');
 }
-function closeSettings(){ document.getElementById('settingsOverlay').classList.remove('show'); }
+function closeSettings(){
+  document.getElementById('settingsOverlay').classList.remove('show');
+  if(_settingsFromMenu){ document.getElementById('modeOverlay').classList.add('show'); _settingsFromMenu=false; }
+}
 
 function renderCountSteppers(){
   const box=document.getElementById('setCounts');
@@ -1078,11 +1275,211 @@ function applySettingsFromUI(){
   GAME_SETTINGS.mapKey=document.getElementById('setMap').value;
   GAME_SETTINGS.obstacleKey=document.getElementById('setObstacle').value;
   GAME_SETTINGS.counts={...draftSettings.counts};
+  // 설정 '시작'은 싱글(AI) 게임을 시작
+  _settingsFromMenu=false;
+  gameState.mode='ai'; gameState.mySide='player'; gameState.online=null;
   applyGameSettings();
   closeSettings();
   document.getElementById('overlay').classList.remove('show');
+  document.getElementById('modeOverlay').classList.remove('show');
+  document.getElementById('onlineInfo').textContent='';
   initGame();
 }
+
+/* =================================================================
+   모드 선택 / 싱글
+   ================================================================= */
+function startSingle(){
+  gameState.mode='ai'; gameState.mySide='player'; gameState.online=null;
+  document.getElementById('modeOverlay').classList.remove('show');
+  document.getElementById('onlineInfo').textContent='';
+  applyGameSettings();
+  initGame();
+}
+
+/* =================================================================
+   온라인 멀티 (Firebase Realtime Database)
+   ================================================================= */
+function genCode(){
+  const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s='';
+  for(let i=0;i<5;i++) s+=a[Math.floor(Math.random()*a.length)];
+  return s;
+}
+
+function openLobby(){
+  document.getElementById('modeOverlay').classList.remove('show');
+  const m=document.getElementById('lobbyMap');
+  m.innerHTML=MAP_PRESETS.map(x=>`<option value="${x.key}">${x.label}</option>`).join('');
+  m.value=GAME_SETTINGS.mapKey;
+  const o=document.getElementById('lobbyObstacle');
+  o.innerHTML=OBSTACLE_PRESETS.map(x=>`<option value="${x.key}">${x.label}</option>`).join('');
+  o.value=GAME_SETTINGS.obstacleKey;
+  document.getElementById('fbWarn').style.display = window.MP.configured()?'none':'block';
+  document.getElementById('createWait').style.display='none';
+  document.getElementById('lobbyOverlay').classList.add('show');
+}
+
+function switchLobbyTab(which){
+  document.getElementById('tabCreate').classList.toggle('active', which==='create');
+  document.getElementById('tabJoin').classList.toggle('active', which==='join');
+  document.getElementById('paneCreate').classList.toggle('active', which==='create');
+  document.getElementById('paneJoin').classList.toggle('active', which==='join');
+}
+
+async function createRoom(){
+  if(!window.MP.configured()){ document.getElementById('fbWarn').style.display='block'; return; }
+  try{ await window.MP.init(); }catch(e){ alert('Firebase 초기화 실패: '+e.message); return; }
+  GAME_SETTINGS.mapKey=document.getElementById('lobbyMap').value;
+  GAME_SETTINGS.obstacleKey=document.getElementById('lobbyObstacle').value;
+  applyGameSettings();
+  const code=genCode();
+  await window.MP._set('rooms/'+code, {
+    status:'placing', settings:GAME_SETTINGS, seats:{host:window.MP.uid()},
+    ready:{player:false, ai:false}, seq:0, ts:Date.now()
+  });
+  window.MP._onDisconnectRemove('rooms/'+code);  // 호스트 이탈 시 방 정리
+  enterOnline(code,'host','player');
+}
+
+async function joinRoom(){
+  const code=(document.getElementById('joinCodeInput').value||'').trim().toUpperCase();
+  const st=document.getElementById('joinStatus');
+  if(code.length<5){ st.textContent='코드 5자리를 입력하세요.'; return; }
+  if(!window.MP.configured()){ document.getElementById('fbWarn').style.display='block'; return; }
+  try{ await window.MP.init(); }catch(e){ st.textContent='Firebase 초기화 실패: '+e.message; return; }
+  const room=await window.MP._get('rooms/'+code);
+  if(!room){ st.textContent='방을 찾을 수 없습니다.'; return; }
+  if(room.seats && room.seats.guest){ st.textContent='이미 가득 찬 방입니다.'; return; }
+  await window.MP._update('rooms/'+code+'/seats', {guest:window.MP.uid()});
+  window.MP._onDisconnectRemove('rooms/'+code+'/seats/guest');
+  // 호스트 설정 수신·적용
+  const s=room.settings||{};
+  if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
+  if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
+  if(s.counts) GAME_SETTINGS.counts={...s.counts};
+  applyGameSettings();
+  enterOnline(code,'guest','ai');
+}
+
+let _roomSubscribed=false;
+function enterOnline(code, role, side){
+  gameState.mode='online'; gameState.mySide=side; gameState.online={code, role};
+  document.getElementById('modeOverlay').classList.remove('show');
+  document.getElementById('lobbyOverlay').classList.remove('show');
+  initGame();
+  document.getElementById('startBtn').textContent='준비 완료';
+  document.getElementById('onlineInfo').textContent=`방 ${code} · ${role==='host'?'호스트':'게스트'}`;
+  if(!_roomSubscribed){ window.MP._onValue('rooms/'+code, handleRoom); _roomSubscribed=true; }
+  log(`온라인 대전 입장 (방 ${code}). 내 진영을 배치하고 '준비 완료'를 누르세요.`,'sys');
+}
+
+function handleRoom(room){
+  if(!room){
+    if(gameState.phase!=='over'){ alert('상대 연결이 종료되었습니다.'); backToMenu(); }
+    return;
+  }
+  // 상대 입장 알림 (배치 단계)
+  if(gameState.phase==='setup'){
+    const both = room.seats && room.seats.host && room.seats.guest;
+    document.getElementById('onlineInfo').textContent =
+      `방 ${gameState.online.code} · ${gameState.online.role==='host'?'호스트':'게스트'}` +
+      (both ? ' · 상대 접속됨' : ' · 상대 대기 중');
+  }
+  // 호스트: 양측 준비 완료 시 초기 상태 생성 (1회)
+  if(gameState.online && gameState.online.role==='host'
+     && gameState.phase!=='playing' && gameState.phase!=='over'
+     && room.status==='placing' && room.ready && room.ready.player && room.ready.ai){
+    buildInitialOnlineState(room);
+    return;
+  }
+  // 진행 상태 동기화 (원격 seq가 더 크면 적용)
+  if(room.state && room.state.seq > gameState.seq){
+    applyRemoteState(room.state);
+  }
+}
+
+function buildInitialOnlineState(room){
+  gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
+  ['player','ai'].forEach(side=>{
+    const list=(room.placements && room.placements[side]) || [];
+    list.forEach(p=>{ if(UNIT_BY_KEY[p.key]) gameState.board[p.r][p.c]=makeUnit(UNIT_BY_KEY[p.key], side); });
+  });
+  gameState.phase='playing';
+  gameState.turn = Math.random()<0.5 ? 'player' : 'ai';
+  gameState.selected=null;
+  gameState.winner=null; gameState.winReason=null;
+  gameState.lastMove={player:null, ai:null};
+  gameState.seq=1;
+  gameState.log.push({msg:`게임 시작! @${gameState.turn} 선공.`, type:'sys', side:null});
+  window.MP._update('rooms/'+gameState.online.code, { status:'playing', state: serializeState() });
+  renderLog(); render();
+}
+
+function onlineReady(){
+  if(placedCount() < totalUnits()) return;
+  const me=gameState.mySide;
+  const list=[];
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u && u.owner===me) list.push({key:u.key, r, c});
+    }
+  window.MP._set('rooms/'+gameState.online.code+'/placements/'+me, list);
+  window.MP._update('rooms/'+gameState.online.code+'/ready', {[me]:true});
+  const btn=document.getElementById('startBtn');
+  btn.disabled=true; btn.textContent='상대 대기 중…';
+  log('준비 완료 — 상대를 기다립니다…','sys');
+}
+
+// gameState → 직렬화 (RTDB 저장용; board는 "r_c" 맵)
+function serializeState(){
+  const board={};
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u) board[r+'_'+c]=u;
+    }
+  return {
+    seq:gameState.seq, phase:gameState.phase, turn:gameState.turn,
+    winner:gameState.winner||null, winReason:gameState.winReason||null,
+    lastMove:gameState.lastMove||{player:null,ai:null},
+    log:gameState.log||[], board
+  };
+}
+
+// 원격 상태 적용
+function applyRemoteState(s){
+  gameState.seq=s.seq;
+  gameState.phase=s.phase;
+  gameState.turn=s.turn;
+  gameState.winner=s.winner||null;
+  gameState.winReason=s.winReason||null;
+  gameState.lastMove=s.lastMove||{player:null,ai:null};
+  gameState.log=s.log||[];
+  gameState.selected=null;
+  gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
+  if(s.board){
+    for(const k in s.board){
+      const [r,c]=k.split('_').map(Number);
+      if(inBounds(r,c)) gameState.board[r][c]=s.board[k];
+    }
+  }
+  if(gameState.online){
+    document.getElementById('onlineInfo').textContent =
+      `방 ${gameState.online.code} · ${gameState.online.role==='host'?'호스트':'게스트'}`;
+  }
+  renderLog(); render();
+  if(gameState.phase==='over') showResult();
+}
+
+// 내 수를 원격에 반영
+function pushState(){
+  if(gameState.mode!=='online' || !gameState.online) return;
+  gameState.seq++;
+  window.MP._set('rooms/'+gameState.online.code+'/state', serializeState());
+}
+
+function backToMenu(){ location.reload(); }
 
 /* =================================================================
    이벤트 바인딩
@@ -1095,9 +1492,25 @@ document.getElementById('cancelSettings').addEventListener('click', closeSetting
 document.getElementById('applySettings').addEventListener('click', applySettingsFromUI);
 document.getElementById('setMap').addEventListener('change', refreshCapNote);
 document.getElementById('setObstacle').addEventListener('change', refreshCapNote);
+// 모드/로비
+document.getElementById('modeSingle').addEventListener('click', startSingle);
+document.getElementById('modeOnline').addEventListener('click', openLobby);
+document.getElementById('modeConfig').addEventListener('click', ()=>openSettings(true));
+document.getElementById('tabCreate').addEventListener('click', ()=>switchLobbyTab('create'));
+document.getElementById('tabJoin').addEventListener('click', ()=>switchLobbyTab('join'));
+document.getElementById('createRoomBtn').addEventListener('click', createRoom);
+document.getElementById('joinRoomBtn').addEventListener('click', joinRoom);
+document.getElementById('lobbyBack').addEventListener('click', ()=>{
+  document.getElementById('lobbyOverlay').classList.remove('show');
+  document.getElementById('modeOverlay').classList.add('show');
+});
 
-applyGameSettings();  // 기본 설정 반영
-initGame();
+// PWA 서비스워커 등록
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+
+applyGameSettings();  // 기본 설정(MAP_CONFIG) 반영 — 모드 선택 후 initGame
 </script>
 </body>
 </html>
