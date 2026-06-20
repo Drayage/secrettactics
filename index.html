@@ -69,6 +69,12 @@
   }
   .turn-pill.player{color:var(--good);border-color:var(--good);}
   .turn-pill.ai{color:var(--bad);border-color:var(--bad);}
+  .audio-btn{
+    background:var(--panel-2);border:1px solid var(--border);border-radius:8px;
+    cursor:pointer;font-size:14px;line-height:1;padding:4px 7px;color:var(--text);
+  }
+  .audio-btn.off{opacity:.4;}
+  .audio-btn:hover{filter:brightness(1.2);}
 
   #board{
     display:grid;gap:3px;background:var(--bg-soft);
@@ -277,6 +283,8 @@
       <span class="turn-pill" id="turnPill">대기</span>
       <span id="counter" style="color:var(--text-dim)"></span>
       <span id="onlineInfo" class="online-badge"></span>
+      <button id="musicToggle" class="audio-btn" title="배경음악">🎵</button>
+      <button id="sfxToggle" class="audio-btn" title="효과음">🔊</button>
     </div>
     <div id="board"></div>
   </div>
@@ -580,6 +588,117 @@ function transformRC(r,c){
     : { r: MAP_CONFIG.rows-1-r, c: MAP_CONFIG.cols-1-c };
 }
 
+/* =================================================================
+   오디오 — Web Audio로 직접 합성 (외부 파일 없음, 오프라인 동작)
+   ================================================================= */
+const Sound = {
+  ctx:null, master:null, music:null, sfx:null,
+  sfxOn:true, musicOn:true, _loop:null, _step:0,
+  ensure(){
+    if(this.ctx || typeof window==='undefined') return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain(); this.master.gain.value=0.9; this.master.connect(this.ctx.destination);
+    this.music  = this.ctx.createGain(); this.music.gain.value=0;   this.music.connect(this.master);
+    this.sfx    = this.ctx.createGain(); this.sfx.gain.value=0.5;   this.sfx.connect(this.master);
+  },
+  resume(){ this.ensure(); if(this.ctx && this.ctx.state==='suspended') this.ctx.resume(); },
+  tone(freq, t0, dur, o){
+    o=o||{};
+    if(!this.ctx) return;
+    const osc=this.ctx.createOscillator(), g=this.ctx.createGain();
+    osc.type=o.type||'sine'; osc.frequency.setValueAtTime(freq, t0);
+    if(o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t0+dur);
+    const gain=o.gain||0.25;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    osc.connect(g); g.connect(this.sfx);
+    osc.start(t0); osc.stop(t0+dur+0.03);
+  },
+  noise(t0, dur, gain){
+    if(!this.ctx) return;
+    const n=this.ctx.createBufferSource();
+    const buf=this.ctx.createBuffer(1, Math.max(1,this.ctx.sampleRate*dur), this.ctx.sampleRate);
+    const d=buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
+    n.buffer=buf;
+    const f=this.ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1400;
+    const g=this.ctx.createGain(); g.gain.value=gain||0.25;
+    n.connect(f); f.connect(g); g.connect(this.sfx);
+    n.start(t0); n.stop(t0+dur);
+  },
+  play(name){
+    this.resume();
+    if(!this.ctx || !this.sfxOn) return;
+    const t=this.ctx.currentTime, T=(f,o,d,opt)=>this.tone(f,t+o,d,opt);
+    switch(name){
+      case 'ui':      T(660,0,0.06,{type:'triangle',gain:0.16}); break;
+      case 'select':  T(523,0,0.07,{type:'triangle',gain:0.2}); T(784,0.05,0.08,{type:'triangle',gain:0.18}); break;
+      case 'place':   T(220,0,0.12,{type:'square',gain:0.2,to:120}); break;
+      case 'move':    T(440,0,0.09,{type:'sine',gain:0.16,to:560}); break;
+      case 'win':     [523,659,784].forEach((f,i)=>T(f,i*0.06,0.13,{type:'triangle',gain:0.22})); break;
+      case 'lose':    [392,330,262].forEach((f,i)=>T(f,i*0.07,0.15,{type:'sawtooth',gain:0.16})); break;
+      case 'clash':   this.noise(t,0.18,0.22); T(150,0,0.2,{type:'square',gain:0.22,to:80}); break;
+      case 'spy':     T(640,0,0.28,{type:'sine',gain:0.18,to:1000}); T(648,0,0.28,{type:'sine',gain:0.12,to:990}); break;
+      case 'start':   [262,330,392,523].forEach((f,i)=>T(f,i*0.09,0.22,{type:'triangle',gain:0.2})); break;
+      case 'victory': [523,659,784,1047].forEach((f,i)=>T(f,i*0.11,0.32,{type:'triangle',gain:0.24})); break;
+      case 'defeat':  [392,311,233].forEach((f,i)=>T(f,i*0.2,0.42,{type:'sawtooth',gain:0.2})); break;
+      case 'turn':    T(880,0,0.1,{type:'sine',gain:0.16}); break;
+    }
+  },
+  startMusic(){
+    this.resume();
+    if(!this.ctx || this._loop) return;
+    // 어두운 단조 패드 진행 (Am - F - G - Em)
+    const chords=[[220,261.63,329.63],[174.61,220,261.63],[196,246.94,293.66],[164.81,196,246.94]];
+    const bar=4.2;
+    const playChord=()=>{
+      if(!this.ctx || !this.musicOn) return;
+      const t=this.ctx.currentTime;
+      const ch=chords[this._step % chords.length]; this._step++;
+      ch.forEach(f=>{
+        const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+        o.type='sine'; o.frequency.value=f;
+        g.gain.setValueAtTime(0.0001,t);
+        g.gain.exponentialRampToValueAtTime(0.09, t+1.3);
+        g.gain.exponentialRampToValueAtTime(0.0001, t+bar);
+        o.connect(g); g.connect(this.music);
+        o.start(t); o.stop(t+bar+0.1);
+      });
+      const b=this.ctx.createOscillator(), bg=this.ctx.createGain();
+      b.type='triangle'; b.frequency.value=ch[0]/2;
+      bg.gain.setValueAtTime(0.0001,t);
+      bg.gain.exponentialRampToValueAtTime(0.13, t+0.3);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t+bar);
+      b.connect(bg); bg.connect(this.music);
+      b.start(t); b.stop(t+bar);
+    };
+    this.music.gain.setValueAtTime(this.musicOn?0.6:0, this.ctx.currentTime);
+    playChord();
+    this._loop=setInterval(playChord, bar*1000);
+  },
+  stopMusic(){
+    if(this._loop){ clearInterval(this._loop); this._loop=null; }
+    if(this.ctx && this.music) this.music.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
+  },
+  toggleSfx(){ this.sfxOn=!this.sfxOn; if(this.sfxOn) this.play('ui'); return this.sfxOn; },
+  toggleMusic(){
+    this.musicOn=!this.musicOn;
+    if(this.ctx && this.music) this.music.gain.setTargetAtTime(this.musicOn?0.6:0, this.ctx.currentTime, 0.15);
+    if(this.musicOn && gameState.phase==='playing') this.startMusic();
+    return this.musicOn;
+  },
+};
+// 로그 엔트리에 맞는 효과음 (내게 보이는 정보만 소리냄)
+function sfxForEntry(e){
+  if(!e || (e.only && e.only!==gameState.mySide)) return null;
+  if(e.type==='combat') return e.side===gameState.mySide ? 'win' : 'lose';
+  if(e.type==='spy') return 'spy';
+  return null;
+}
+
 // 유닛 객체 생성기
 function makeUnit(def, owner){
   return {
@@ -681,6 +800,7 @@ function selectDeck(key){
   if(gameState.phase!=='setup') return;
   if(gameState.deckRemaining[key] <= 0) return;
   gameState.selectedDeckKey = (gameState.selectedDeckKey===key) ? null : key;
+  Sound.play('ui');
   render();
 }
 
@@ -767,6 +887,7 @@ function onSetupClick(r,c){
   if(cur && cur.owner===me){
     gameState.deckRemaining[cur.key]++;
     gameState.board[r][c] = null;
+    Sound.play('ui');
     render();
     return;
   }
@@ -782,6 +903,7 @@ function onSetupClick(r,c){
   gameState.board[r][c] = makeUnit(UNIT_BY_KEY[key], me);
   gameState.deckRemaining[key]--;
   if(gameState.deckRemaining[key]===0) gameState.selectedDeckKey = null;
+  Sound.play('place');
   render();
 }
 
@@ -797,6 +919,7 @@ function startGame(){
   // 선공/후공 랜덤
   gameState.turn = Math.random() < 0.5 ? 'player' : 'ai';
   log(`게임 시작! ${gameState.turn==='player'?'플레이어':'AI'} 선공.`, 'sys');
+  Sound.play('start'); Sound.startMusic();
   render();
   if(gameState.turn==='ai') setTimeout(aiTurn, 800);
 }
@@ -825,8 +948,9 @@ function onPlayClick(r,c){
 
   // 내 이동 가능 유닛 선택/해제
   if(cell && cell.owner===me && cell.movable){
-    gameState.selected = (gameState.selected && gameState.selected.r===r && gameState.selected.c===c)
-      ? null : {r,c};
+    const same = gameState.selected && gameState.selected.r===r && gameState.selected.c===c;
+    gameState.selected = same ? null : {r,c};
+    if(!same) Sound.play('select');
   } else {
     gameState.selected = null;
   }
@@ -903,11 +1027,15 @@ function doMove(from, to, mover){
     gameState.board[to.r][to.c] = att;
     gameState.board[from.r][from.c] = null;
     recordMove(true);
+    Sound.play('move');
     return;
   }
 
-  // 전투 발생 — 전투가 일어나면 양측 모두 두 유닛의 계급을 알게 됨(정통 룰)
+  // 전투 발생
   const result = resolveCombat(att, target);
+  const winnerSide = result==='attacker' ? att.owner : target.owner;
+  Sound.play('clash');
+  setTimeout(()=>Sound.play(winnerSide===gameState.mySide ? 'win' : 'lose'), 140);
   const aName = nm(att), dName = nm(target);
 
   if(result==='attacker'){
@@ -946,6 +1074,7 @@ function handleSpyReveal(dying, killer){
     killer.revealedTo = dying.owner;   // 스파이 소유자가 가해자를 알게 됨
     // 이 로그는 스파이 소유자에게만 보임. 가해자 라벨은 강제 공개(@!).
     log(`💀 @${dying.owner} 스파이가 쓰러지며 @!${killer.owner}:${killer.label}의 정체를 폭로!`, 'spy', null, dying.owner);
+    if(dying.owner===gameState.mySide) Sound.play('spy');  // 정보를 얻는 쪽에게만 소리
   }
 }
 
@@ -976,6 +1105,8 @@ function endGame(winner, reason){
   gameState.winner=winner;
   gameState.winReason=reason;
   log(`@${winner} 승리! (${reason})`, 'sys', winner);
+  Sound.stopMusic();
+  Sound.play(winner===gameState.mySide ? 'victory' : 'defeat');
   if(gameState.mode==='online') pushState();   // 결과 동기화
   render();
   showResult();
@@ -1462,6 +1593,7 @@ function buildInitialOnlineState(room){
   gameState.seq=1;
   gameState.log.push({msg:`게임 시작! @${gameState.turn} 선공.`, type:'sys', side:null});
   window.MP._update('chetics_rooms/'+gameState.online.code, { status:'playing', state: serializeState() });
+  Sound.play('start'); Sound.startMusic();
   renderLog(); render();
 }
 
@@ -1499,6 +1631,7 @@ function serializeState(){
 
 // 원격 상태 적용
 function applyRemoteState(s){
+  const wasPlaying = gameState.phase==='playing';
   gameState.seq=s.seq;
   gameState.phase=s.phase;
   gameState.turn=s.turn;
@@ -1507,6 +1640,15 @@ function applyRemoteState(s){
   gameState.lastMove=s.lastMove||{player:null,ai:null};
   gameState.log=s.log||[];
   gameState.selected=null;
+  // 상대 수에 대한 효과음 (내게 보이는 정보만)
+  if(gameState.phase==='playing'){
+    if(!wasPlaying){ Sound.play('start'); Sound.startMusic(); }
+    else {
+      const sfx=sfxForEntry(gameState.log[gameState.log.length-1]);
+      if(sfx){ Sound.play('clash'); setTimeout(()=>Sound.play(sfx),150); }
+      else if(gameState.turn===gameState.mySide) Sound.play('turn');
+    }
+  }
   gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
   if(s.board){
     for(const k in s.board){
@@ -1554,6 +1696,16 @@ document.getElementById('lobbyBack').addEventListener('click', ()=>{
   document.getElementById('lobbyOverlay').classList.remove('show');
   document.getElementById('modeOverlay').classList.add('show');
 });
+// 오디오 토글
+document.getElementById('musicToggle').addEventListener('click', (e)=>{
+  const on=Sound.toggleMusic(); e.currentTarget.classList.toggle('off', !on);
+});
+document.getElementById('sfxToggle').addEventListener('click', (e)=>{
+  const on=Sound.toggleSfx();
+  e.currentTarget.textContent = on?'🔊':'🔇'; e.currentTarget.classList.toggle('off', !on);
+});
+// 첫 사용자 제스처에 오디오 컨텍스트 활성화 (브라우저 자동재생 정책)
+window.addEventListener('pointerdown', ()=>Sound.resume(), true);
 
 // PWA 서비스워커 등록
 if('serviceWorker' in navigator){
