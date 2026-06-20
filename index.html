@@ -353,6 +353,25 @@
       <select class="set-select" id="setObstacle"></select>
     </div>
     <div class="set-row">
+      <label>유닛 구성</label>
+      <div class="count-grid">
+        <div class="count-item"><span>★ 별</span>
+          <span class="stepper">
+            <button data-comp="star" data-act="dec">−</button>
+            <span data-comp-val="star">3</span>
+            <button data-comp="star" data-act="inc">+</button>
+          </span>
+        </div>
+        <div class="count-item"><span># 숫자</span>
+          <span class="stepper">
+            <button data-comp="number" data-act="dec">−</button>
+            <span data-comp-val="number">9</span>
+            <button data-comp="number" data-act="inc">+</button>
+          </span>
+        </div>
+      </div>
+    </div>
+    <div class="set-row">
       <label>특수 유닛 갯수</label>
       <div class="count-grid" id="setCounts"></div>
       <div class="set-note" id="capNote"></div>
@@ -434,9 +453,11 @@
       <button id="rlTabAi" class="active">AI 대전</button>
       <button id="rlTabOnline">온라인</button>
     </div>
-    <div id="replayList" style="max-height:50vh;overflow-y:auto"></div>
+    <div id="replayList" style="max-height:46vh;overflow-y:auto"></div>
     <div class="lobby-note" id="replayEmpty" style="display:none">저장된 기록이 없습니다.</div>
-    <button class="btn btn-ghost" id="replayListBack" style="margin-top:12px">← 뒤로</button>
+    <input type="file" id="replayFile" accept="application/json,.json" style="display:none">
+    <button class="btn btn-ghost" id="replayImportBtn" style="margin-top:10px">⬆ 파일 불러오기</button>
+    <button class="btn btn-ghost" id="replayListBack" style="margin-top:8px">← 뒤로</button>
   </div>
 </div>
 
@@ -446,6 +467,7 @@
   <button id="rpPrev" class="rp-btn">⏮</button>
   <button id="rpPlay" class="rp-btn">⏸</button>
   <button id="rpNext" class="rp-btn">⏭</button>
+  <button id="rpSpeed" class="rp-btn" title="재생 속도">1×</button>
   <input type="range" id="rpSlider" min="0" max="0" value="0">
   <span id="rpInfo" class="rp-info">0 / 0</span>
 </div>
@@ -512,32 +534,31 @@ const MAP_CONFIG = {
   blocked: [],
 };
 
-// --- 유닛 설정 (총 20마리 덱) ---
+// --- 유닛 설정 ---
 // power: 내부 전투력 수치 (높을수록 강함). role: 특수 상성 키.
 // movable: 이동 가능 여부. isStar/isGas(폭탄): 상성 판정 플래그. icon: 보드 표시 아이콘.
-const UNIT_CONFIG = [
-  // 별 유닛 3 (별3가 가장 강함)
-  { key:'star3', label:'별3', icon:'★3', power:12, count:1, isStar:true, cls:'star' },
-  { key:'star2', label:'별2', icon:'★2', power:11, count:1, isStar:true, cls:'star' },
-  { key:'star1', label:'별1', icon:'★1', power:10, count:1, isStar:true, cls:'star' },
-  // 일반 숫자 유닛 9~1 (Power 9~1)
-  ...Array.from({length:9}, (_,i)=>{
-    const n = 9 - i;
-    return { key:'num'+n, label:String(n), icon:String(n), power:n, count:1, cls:'num' };
-  }),
-  // 특수 유닛 서열 (sub: 우하단 파워 표기)
+// 특수 유닛 (별·숫자 외) — sub: 우하단 파워 표기
+const SPECIAL_UNITS = [
   { key:'defuser',   label:'제거반', icon:'✂️', sub:'-1', power:0,  count:2, role:'defuser',   cls:'special' }, // 제거반: 폭탄만 해체
   { key:'spy',       label:'스파이', icon:'🕵️', sub:'-2', power:-1, count:2, role:'spy',        cls:'special' }, // 사망 시 정체 폭로
   { key:'starkiller',label:'별킬러', icon:'🗡️', sub:'-3', power:-2, count:1, role:'starkiller', cls:'special' },// 별 유닛 무조건 승
   { key:'king',      label:'왕',   icon:'👑', power:-3, count:1, role:'king', movable:false, cls:'king' },   // 이동불가·모두에게 패배
   { key:'gas',       label:'폭탄',  icon:'💣', power:null,count:2, role:'gas', movable:false, isGas:true, cls:'special' }, // 이동불가·부딪히면 무조건 승리
 ];
+// 별 N개 + 숫자 M개 + 특수 유닛으로 덱 구성을 생성 (별 power = M+i 로 항상 숫자보다 강함)
+function buildUnitConfig(starCount, numberCount){
+  const stars=[];
+  for(let i=starCount;i>=1;i--) stars.push({ key:'star'+i, label:'별'+i, icon:'★'+i, power:numberCount+i, count:1, isStar:true, cls:'star' });
+  const nums=[];
+  for(let n=numberCount;n>=1;n--) nums.push({ key:'num'+n, label:String(n), icon:String(n), power:n, count:1, cls:'num' });
+  return [...stars, ...nums, ...SPECIAL_UNITS.map(u=>({...u}))];   // 특수유닛은 복사(갯수 리셋)
+}
+
+let UNIT_CONFIG = buildUnitConfig(3, 9);
+let UNIT_BY_KEY = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u]));
 
 // 덱 총 유닛 수 (배치 완료 판정) — 설정에 따라 가변
 function totalUnits(){ return UNIT_CONFIG.reduce((s,u)=>s+u.count,0); }
-
-// 빠른 조회용 맵
-const UNIT_BY_KEY = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u]));
 function isMovableDef(def){ return def.movable !== false; }
 
 // 특수유닛 서열 (강함 → 약함). 특수유닛끼리 붙으면 이 서열로 승패가 결정됨.
@@ -578,10 +599,14 @@ const SPECIAL_KEYS = [
 const GAME_SETTINGS = {
   mapKey: '7x10',
   obstacleKey: 'none',
+  starCount: 3,            // 별 유닛 종류 수
+  numberCount: 9,          // 숫자 유닛 종류 수
   counts: { defuser:2, spy:2, starkiller:1, gas:2 },
   revealOnCombat: false,   // 전투 시 그 말들을 양측에 공개
   killLog: false,          // 유닛 좌상단에 킬수(적은 처치한 내 최고 말도) 표시
 };
+// 별/숫자 개수 허용 범위
+const COMP_RANGE = { star:{min:1,max:5}, number:{min:4,max:12} };
 
 // 180° 점대칭 장애물 좌표 생성
 function generateObstacles(obstacleKey, cols, rows){
@@ -600,6 +625,13 @@ function generateObstacles(obstacleKey, cols, rows){
 
 // 설정값을 MAP_CONFIG / UNIT_CONFIG 에 반영
 function applyGameSettings(){
+  // 별/숫자 개수로 유닛 구성 재생성
+  const sc = Math.max(COMP_RANGE.star.min,   Math.min(COMP_RANGE.star.max,   GAME_SETTINGS.starCount   || 3));
+  const nc = Math.max(COMP_RANGE.number.min, Math.min(COMP_RANGE.number.max, GAME_SETTINGS.numberCount || 9));
+  GAME_SETTINGS.starCount = sc; GAME_SETTINGS.numberCount = nc;
+  UNIT_CONFIG = buildUnitConfig(sc, nc);
+  UNIT_BY_KEY = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u]));
+
   const map = MAP_PRESETS.find(m=>m.key===GAME_SETTINGS.mapKey) || MAP_PRESETS[0];
   MAP_CONFIG.cols = map.cols;
   MAP_CONFIG.rows = map.rows;
@@ -1508,9 +1540,14 @@ function openSettings(fromMenu){
   obSel.value = draftSettings.obstacleKey;
   document.getElementById('setReveal').checked = !!draftSettings.revealOnCombat;
   document.getElementById('setKillLog').checked = !!draftSettings.killLog;
+  syncCompVals();
   renderCountSteppers();
   refreshCapNote();
   document.getElementById('settingsOverlay').classList.add('show');
+}
+function syncCompVals(){
+  document.querySelector('[data-comp-val="star"]').textContent = draftSettings.starCount;
+  document.querySelector('[data-comp-val="number"]').textContent = draftSettings.numberCount;
 }
 function closeSettings(){
   document.getElementById('settingsOverlay').classList.remove('show');
@@ -1548,7 +1585,7 @@ function refreshCapNote(){
   draftSettings.mapKey=document.getElementById('setMap').value;
   draftSettings.obstacleKey=document.getElementById('setObstacle').value;
   const capacity = MAP_CONFIG.playerZoneRows * map.cols;
-  const fixed = 3 + 9 + 1; // 별3 + 숫자9 + 왕1
+  const fixed = draftSettings.starCount + draftSettings.numberCount + 1; // 별 + 숫자 + 왕1
   const deck = fixed + SPECIAL_KEYS.reduce((s,k)=>s+draftSettings.counts[k.key],0);
   const note=document.getElementById('capNote');
   if(deck>capacity){
@@ -1563,6 +1600,8 @@ function refreshCapNote(){
 function applySettingsFromUI(){
   GAME_SETTINGS.mapKey=document.getElementById('setMap').value;
   GAME_SETTINGS.obstacleKey=document.getElementById('setObstacle').value;
+  GAME_SETTINGS.starCount=draftSettings.starCount;
+  GAME_SETTINGS.numberCount=draftSettings.numberCount;
   GAME_SETTINGS.counts={...draftSettings.counts};
   GAME_SETTINGS.revealOnCombat=document.getElementById('setReveal').checked;
   GAME_SETTINGS.killLog=document.getElementById('setKillLog').checked;
@@ -1672,6 +1711,8 @@ async function joinRoom(){
     if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
     if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
     if(s.counts) GAME_SETTINGS.counts={...s.counts};
+    if(s.starCount) GAME_SETTINGS.starCount=s.starCount;
+    if(s.numberCount) GAME_SETTINGS.numberCount=s.numberCount;
     GAME_SETTINGS.revealOnCombat=!!s.revealOnCombat;
     GAME_SETTINGS.killLog=!!s.killLog;
     applyGameSettings();
@@ -1922,15 +1963,19 @@ function exportReplay(rec){
 }
 
 // --- 리플레이 재생 ---
-const Replay = { rec:null, idx:0, playing:false, timer:null };
+const Replay = { rec:null, idx:0, playing:false, timer:null, speed:1 };
+const REPLAY_BASE_MS = 1100;
 function startReplay(rec){
+  if(!rec || !Array.isArray(rec.frames) || !rec.frames.length){ alert('재생할 수 없는 기록입니다.'); return; }
   Replay.rec=rec; Replay.idx=0; Replay.playing=true;
   ['modeOverlay','lobbyOverlay','replayListOverlay','overlay'].forEach(id=>document.getElementById(id).classList.remove('show'));
-  // 기록된 설정으로 맵 복원
+  // 기록된 설정으로 복원
   const s=rec.settings||{};
   if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
   if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
   if(s.counts) GAME_SETTINGS.counts={...s.counts};
+  if(s.starCount) GAME_SETTINGS.starCount=s.starCount;
+  if(s.numberCount) GAME_SETTINGS.numberCount=s.numberCount;
   GAME_SETTINGS.killLog = !!s.killLog;
   applyGameSettings();
   gameState.mode='replay'; gameState.mySide='player'; gameState.online=null;
@@ -1941,13 +1986,18 @@ function startReplay(rec){
   document.getElementById('replayBar').classList.add('show');
   document.getElementById('rpSlider').max=String(rec.frames.length-1);
   showReplayFrame();
-  if(Replay.timer) clearInterval(Replay.timer);
-  Replay.timer=setInterval(()=>{
-    if(!Replay.playing) return;
-    if(Replay.idx < Replay.rec.frames.length-1){ Replay.idx++; showReplayFrame(); }
-    else { Replay.playing=false; updateReplayPlayBtn(); }
-  }, 1100);
+  scheduleReplayTick();
   updateReplayPlayBtn();
+}
+function scheduleReplayTick(){
+  if(Replay.timer) clearTimeout(Replay.timer);
+  Replay.timer=setTimeout(()=>{
+    if(Replay.playing){
+      if(Replay.idx < Replay.rec.frames.length-1){ Replay.idx++; showReplayFrame(); }
+      else { Replay.playing=false; updateReplayPlayBtn(); }
+    }
+    if(gameState.phase==='replay') scheduleReplayTick();   // 재생 중이 아니어도 폴링 유지(속도 변경 반영)
+  }, REPLAY_BASE_MS / Replay.speed);
 }
 function loadFrameToBoard(fr){
   gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
@@ -1982,9 +2032,27 @@ function replayStep(d){
 }
 function replayClose(){
   Replay.playing=false;
-  if(Replay.timer){ clearInterval(Replay.timer); Replay.timer=null; }
+  if(Replay.timer){ clearTimeout(Replay.timer); Replay.timer=null; }
   document.getElementById('replayBar').classList.remove('show');
   backToMenu();
+}
+function cycleReplaySpeed(){
+  const opts=[0.5,1,2];
+  Replay.speed = opts[(opts.indexOf(Replay.speed)+1) % opts.length];
+  document.getElementById('rpSpeed').textContent = Replay.speed+'×';
+}
+// 외부 JSON 파일을 불러와 재생
+function importReplayFile(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const rec=JSON.parse(reader.result);
+      if(!rec.frames || !rec.frames.length) throw new Error('frames 없음');
+      startReplay(rec);
+    }catch(e){ alert('리플레이 파일을 읽을 수 없습니다: '+e.message); }
+  };
+  reader.readAsText(file);
 }
 
 /* =================================================================
@@ -2036,7 +2104,22 @@ document.getElementById('rpPlay').addEventListener('click', ()=>{
 });
 document.getElementById('rpPrev').addEventListener('click', ()=>replayStep(-1));
 document.getElementById('rpNext').addEventListener('click', ()=>replayStep(1));
+document.getElementById('rpSpeed').addEventListener('click', cycleReplaySpeed);
 document.getElementById('rpClose').addEventListener('click', replayClose);
+document.getElementById('replayImportBtn').addEventListener('click', ()=>document.getElementById('replayFile').click());
+document.getElementById('replayFile').addEventListener('change', (e)=>{ importReplayFile(e.target.files[0]); e.target.value=''; });
+// 별/숫자 구성 스텝퍼
+document.querySelectorAll('[data-comp]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const comp=btn.dataset.comp, rng=COMP_RANGE[comp];
+    const cur = comp==='star' ? draftSettings.starCount : draftSettings.numberCount;
+    let v=cur + (btn.dataset.act==='inc'?1:-1);
+    v=Math.max(rng.min, Math.min(rng.max, v));
+    if(comp==='star') draftSettings.starCount=v; else draftSettings.numberCount=v;
+    syncCompVals();
+    refreshCapNote();
+  });
+});
 document.getElementById('rpSlider').addEventListener('input', (e)=>{
   Replay.playing=false; updateReplayPlayBtn();
   Replay.idx=parseInt(e.target.value,10)||0; showReplayFrame();
