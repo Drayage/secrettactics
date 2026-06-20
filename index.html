@@ -118,6 +118,12 @@
     position:absolute;right:1px;bottom:0;font-size:calc(var(--cs)*0.26);font-weight:800;
     line-height:1;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;pointer-events:none;
   }
+  /* 킬로그 좌상단 배지 */
+  .unit .killbadge{
+    position:absolute;left:-2px;top:-3px;font-size:calc(var(--cs)*0.24);font-weight:800;
+    line-height:1;color:#ffe08a;background:rgba(10,14,22,.85);border:1px solid #5a4a16;
+    border-radius:6px;padding:0 2px;white-space:nowrap;pointer-events:none;
+  }
   .unit.mine{background:linear-gradient(160deg,#2e3c5c,#243049);color:var(--text);border:1px solid #46598a;}
   .unit.mine.star{background:linear-gradient(160deg,#5a4a16,#3d3210);color:var(--star);border-color:#9a821f;}
   .unit.mine.special{background:linear-gradient(160deg,#3a2c5e,#2a2046);color:#d6c8ff;border-color:#6a52a8;}
@@ -213,6 +219,34 @@
   .stepper span{min-width:16px;text-align:center;font-weight:800;}
   .set-note{font-size:11px;color:var(--text-dim);margin-top:4px;}
   .set-note.warn{color:var(--warn);}
+  .check{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text);
+    margin:6px 0;cursor:pointer;font-weight:600;}
+  .check input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
+
+  /* 기록 목록 */
+  .replay-item{display:flex;align-items:center;gap:8px;background:var(--panel-2);
+    border:1px solid var(--border);border-radius:10px;padding:9px 11px;margin:7px 0;}
+  .replay-item .meta{flex:1;font-size:12px;line-height:1.5;}
+  .replay-item .meta b{color:var(--text);}
+  .replay-item .res-win{color:var(--good);font-weight:800;}
+  .replay-item .res-lose{color:var(--bad);font-weight:800;}
+  .replay-item button{border:1px solid var(--border);background:var(--panel);color:var(--text);
+    border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;cursor:pointer;}
+  .replay-item button:hover{filter:brightness(1.2);}
+
+  /* 리플레이 컨트롤 바 */
+  #replayBar{
+    position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:none;
+    align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);
+    border-radius:14px;padding:8px 12px;z-index:40;box-shadow:0 10px 30px rgba(0,0,0,.5);
+    max-width:94vw;
+  }
+  #replayBar.show{display:flex;}
+  .rp-btn{background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    border-radius:9px;width:38px;height:34px;font-size:15px;cursor:pointer;}
+  .rp-btn:hover{filter:brightness(1.2);}
+  #rpSlider{width:min(40vw,260px);accent-color:var(--accent);}
+  .rp-info{font-size:12px;color:var(--text-dim);min-width:54px;text-align:center;}
 
   /* Mode / Lobby */
   .modal.menu{text-align:center;max-width:380px;width:90vw;}
@@ -323,6 +357,11 @@
       <div class="count-grid" id="setCounts"></div>
       <div class="set-note" id="capNote"></div>
     </div>
+    <div class="set-row">
+      <label>게임 모드</label>
+      <label class="check"><input type="checkbox" id="setReveal"> 전투 후 공개 (전투한 말의 정체가 공개됨)</label>
+      <label class="check"><input type="checkbox" id="setKillLog"> 킬로그 (말 좌상단에 킬수·처치한 내 최고 말 표시)</label>
+    </div>
     <div class="btn-row">
       <button class="btn btn-ghost" id="cancelSettings">취소</button>
       <button class="btn btn-primary" id="applySettings">시작</button>
@@ -338,6 +377,7 @@
     <button class="btn btn-primary" id="modeSingle">🤖 싱글 (AI 대전)</button>
     <button class="btn btn-ghost" id="modeOnline">🌐 온라인 대전 (2인)</button>
     <button class="btn btn-ghost" id="modeConfig">⚙ 게임 설정</button>
+    <button class="btn btn-ghost" id="modeReplay">🎬 기록 / 리플레이</button>
   </div>
 </div>
 
@@ -359,6 +399,11 @@
         <label>장애물</label>
         <select class="set-select" id="lobbyObstacle"></select>
       </div>
+      <div class="set-row" style="text-align:left">
+        <label>게임 모드</label>
+        <label class="check"><input type="checkbox" id="lobbyReveal"> 전투 후 공개</label>
+        <label class="check"><input type="checkbox" id="lobbyKillLog"> 킬로그</label>
+      </div>
       <button class="btn btn-primary" id="createRoomBtn">방 생성</button>
       <div id="createWait" style="display:none">
         <div class="lobby-note">상대에게 이 코드를 공유하세요</div>
@@ -379,6 +424,30 @@
     <div class="lobby-note">⚠ 블라인드 anti-cheat는 신뢰 기반(프로토타입): DB를 직접 열람하면 상대 배치가 보일 수 있습니다.</div>
     <button class="btn btn-ghost" id="lobbyBack" style="margin-top:10px">← 뒤로</button>
   </div>
+</div>
+
+<!-- 기록 목록 -->
+<div class="overlay" id="replayListOverlay">
+  <div class="modal menu" style="max-width:440px;width:92vw;text-align:left">
+    <h2 style="text-align:center">게임 기록</h2>
+    <div class="lobby-tabs">
+      <button id="rlTabAi" class="active">AI 대전</button>
+      <button id="rlTabOnline">온라인</button>
+    </div>
+    <div id="replayList" style="max-height:50vh;overflow-y:auto"></div>
+    <div class="lobby-note" id="replayEmpty" style="display:none">저장된 기록이 없습니다.</div>
+    <button class="btn btn-ghost" id="replayListBack" style="margin-top:12px">← 뒤로</button>
+  </div>
+</div>
+
+<!-- 리플레이 컨트롤 바 -->
+<div id="replayBar">
+  <button id="rpClose" class="rp-btn" title="닫기">✕</button>
+  <button id="rpPrev" class="rp-btn">⏮</button>
+  <button id="rpPlay" class="rp-btn">⏸</button>
+  <button id="rpNext" class="rp-btn">⏭</button>
+  <input type="range" id="rpSlider" min="0" max="0" value="0">
+  <span id="rpInfo" class="rp-info">0 / 0</span>
 </div>
 
 <!-- Firebase SDK + 플러밍 (모듈) -->
@@ -510,6 +579,8 @@ const GAME_SETTINGS = {
   mapKey: '7x10',
   obstacleKey: 'none',
   counts: { defuser:2, spy:2, starkiller:1, gas:2 },
+  revealOnCombat: false,   // 전투 시 그 말들을 양측에 공개
+  killLog: false,          // 유닛 좌상단에 킬수(적은 처치한 내 최고 말도) 표시
 };
 
 // 180° 점대칭 장애물 좌표 생성
@@ -744,6 +815,8 @@ function makeUnit(def, owner){
     movable: isMovableDef(def),
     cls: def.cls,
     revealedTo: null,      // 이 유닛 정체를 알게 된 상대 진영('player'|'ai'|null)
+    kills: 0,              // 처치 수 (킬로그)
+    bestVictim: null,      // 처치한 가장 강한 상대 말 {label, power}
   };
 }
 
@@ -758,6 +831,7 @@ function initGame(){
   gameState.aiPlaced = false;
   gameState.winner = null;
   gameState.winReason = null;
+  gameState.revealAll = false;
   gameState.seq = 0;
   gameState.lastMove = { player:null, ai:null };
   gameState.log = [];
@@ -949,6 +1023,7 @@ function startGame(){
   gameState.turn = Math.random() < 0.5 ? 'player' : 'ai';
   log(`게임 시작! ${gameState.turn==='player'?'플레이어':'AI'} 선공.`, 'sys');
   Sound.play('start'); Sound.startMusic();
+  startRecording();
   render();
   if(gameState.turn==='ai') setTimeout(aiTurn, 800);
 }
@@ -1057,6 +1132,7 @@ function doMove(from, to, mover){
     gameState.board[from.r][from.c] = null;
     recordMove(true);
     Sound.play('move');
+    recordFrame(to, mover);
     return;
   }
 
@@ -1065,11 +1141,22 @@ function doMove(from, to, mover){
   const winnerSide = result==='attacker' ? att.owner : target.owner;
   Sound.play('clash');
   setTimeout(()=>Sound.play(winnerSide===gameState.mySide ? 'win' : 'lose'), 140);
-  const aName = nm(att), dName = nm(target);
+  // 전투 후 공개 모드면 로그에 양측 계급을 강제 공개
+  const rc = GAME_SETTINGS.revealOnCombat;
+  const aName = rc ? `@!${att.owner}:${att.label}` : nm(att);
+  const dName = rc ? `@!${target.owner}:${target.label}` : nm(target);
+  // 킬 기록 + (전투 후 공개 모드면) 승자 정체 공개
+  const creditKill = (winner, loser)=>{
+    winner.kills = (winner.kills||0) + 1;
+    const lp = (loser.power==null) ? -99 : loser.power;
+    if(!winner.bestVictim || lp > winner.bestVictim.power) winner.bestVictim = { label:loser.label, power:lp };
+    if(rc) winner.revealedTo = opponentSide(winner.owner);
+  };
 
   if(result==='attacker'){
     handleSpyReveal(target, att);            // 방어자(target)가 스파이면 폭로
     if(target.role==='king') registerKingLoss(target.owner);
+    creditKill(att, target);
     gameState.board[to.r][to.c] = att;
     gameState.board[from.r][from.c] = null;
     recordMove(true);
@@ -1077,7 +1164,8 @@ function doMove(from, to, mover){
   } else if(result==='defender'){
     handleSpyReveal(att, target);            // 공격자가 스파이면 폭로
     if(att.role==='king') registerKingLoss(att.owner);
-    gameState.board[from.r][from.c] = null;  // 공격자 소멸 (방어 유닛은 정체 비공개)
+    creditKill(target, att);
+    gameState.board[from.r][from.c] = null;  // 공격자 소멸
     recordMove(false);
     log(`${aName} ⚔ ${dName} → <b>${dName} 승리</b>`, 'combat', target.owner);
   } else { // both (양쪽 소멸)
@@ -1091,6 +1179,7 @@ function doMove(from, to, mover){
     log(`${aName} ⚔ ${dName} → <b>양쪽 소멸</b>`, 'sys');
   }
 
+  recordFrame(to, mover);   // 게임오버 저장 전에 마지막 프레임 기록
   checkWin();
 }
 
@@ -1136,6 +1225,7 @@ function endGame(winner, reason){
   log(`@${winner} 승리! (${reason})`, 'sys', winner);
   Sound.stopMusic();
   Sound.play(winner===gameState.mySide ? 'victory' : 'defeat');
+  saveRecording();
   if(gameState.mode==='online') pushState();   // 결과 동기화
   render();
   showResult();
@@ -1280,13 +1370,17 @@ function render(){
   // 상태바
   document.getElementById('phaseText').textContent =
     gameState.phase==='setup' ? '배치 페이즈' :
-    gameState.phase==='playing' ? '플레이 페이즈' : '게임 종료';
+    gameState.phase==='playing' ? '플레이 페이즈' :
+    gameState.phase==='replay' ? '리플레이' : '게임 종료';
   const pill=document.getElementById('turnPill');
   const myTurn = gameState.turn===gameState.mySide;
   if(gameState.phase==='playing'){
     const oppLabel = gameState.mode==='ai' ? 'AI' : '상대';
     pill.textContent = myTurn ? '당신의 턴' : `${oppLabel} 턴`;
     pill.className='turn-pill '+(myTurn?'player':'ai');
+  } else if(gameState.phase==='replay'){
+    pill.textContent = (gameState.turn==='player'?'아군':'상대')+' 차례';
+    pill.className='turn-pill '+(gameState.turn==='player'?'player':'ai');
   } else {
     pill.textContent = gameState.phase==='over'?'종료':'대기';
     pill.className='turn-pill';
@@ -1345,7 +1439,7 @@ function render(){
         const div=document.createElement('div');
         div.className='unit';
         const mine = u.owner===me;
-        const visible = mine || u.revealedTo===me;   // 정체가 내게 보이는가
+        const visible = mine || u.revealedTo===me || gameState.revealAll;   // 정체가 내게 보이는가
         if(mine){
           // 내 유닛: 알록달록 (계급별 색)
           div.classList.add('mine');
@@ -1364,6 +1458,15 @@ function render(){
           const sb=document.createElement('span');
           sb.className='sub'; sb.textContent=u.sub;
           div.appendChild(sb);
+        }
+        // 킬로그: 좌상단 킬수(+적 유닛이면 처치한 내 최고 말)
+        if(GAME_SETTINGS.killLog && u.kills>0){
+          const kb=document.createElement('span');
+          kb.className='killbadge';
+          let txt='⚔'+u.kills;
+          if(!mine && !gameState.revealAll && u.bestVictim) txt+=' '+u.bestVictim.label; // 적 말: 내 최고 희생자
+          kb.textContent=txt;
+          div.appendChild(kb);
         }
         cell.appendChild(div);
 
@@ -1403,6 +1506,8 @@ function openSettings(fromMenu){
   const obSel=document.getElementById('setObstacle');
   obSel.innerHTML = OBSTACLE_PRESETS.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
   obSel.value = draftSettings.obstacleKey;
+  document.getElementById('setReveal').checked = !!draftSettings.revealOnCombat;
+  document.getElementById('setKillLog').checked = !!draftSettings.killLog;
   renderCountSteppers();
   refreshCapNote();
   document.getElementById('settingsOverlay').classList.add('show');
@@ -1459,6 +1564,8 @@ function applySettingsFromUI(){
   GAME_SETTINGS.mapKey=document.getElementById('setMap').value;
   GAME_SETTINGS.obstacleKey=document.getElementById('setObstacle').value;
   GAME_SETTINGS.counts={...draftSettings.counts};
+  GAME_SETTINGS.revealOnCombat=document.getElementById('setReveal').checked;
+  GAME_SETTINGS.killLog=document.getElementById('setKillLog').checked;
   // 설정 '시작'은 싱글(AI) 게임을 시작
   _settingsFromMenu=false;
   gameState.mode='ai'; gameState.mySide='player'; gameState.online=null;
@@ -1498,6 +1605,8 @@ function openLobby(){
   const o=document.getElementById('lobbyObstacle');
   o.innerHTML=OBSTACLE_PRESETS.map(x=>`<option value="${x.key}">${x.label}</option>`).join('');
   o.value=GAME_SETTINGS.obstacleKey;
+  document.getElementById('lobbyReveal').checked = !!GAME_SETTINGS.revealOnCombat;
+  document.getElementById('lobbyKillLog').checked = !!GAME_SETTINGS.killLog;
   document.getElementById('fbWarn').style.display = window.MP.configured()?'none':'block';
   document.getElementById('createWait').style.display='none';
   document.getElementById('lobbyOverlay').classList.add('show');
@@ -1526,6 +1635,8 @@ async function createRoom(){
     await window.MP.init();
     GAME_SETTINGS.mapKey=document.getElementById('lobbyMap').value;
     GAME_SETTINGS.obstacleKey=document.getElementById('lobbyObstacle').value;
+    GAME_SETTINGS.revealOnCombat=document.getElementById('lobbyReveal').checked;
+    GAME_SETTINGS.killLog=document.getElementById('lobbyKillLog').checked;
     applyGameSettings();
     const code=genCode();
     await window.MP._set('chetics_rooms/'+code, {
@@ -1561,6 +1672,8 @@ async function joinRoom(){
     if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
     if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
     if(s.counts) GAME_SETTINGS.counts={...s.counts};
+    GAME_SETTINGS.revealOnCombat=!!s.revealOnCombat;
+    GAME_SETTINGS.killLog=!!s.killLog;
     applyGameSettings();
     enterOnline(code,'guest','ai');
   }catch(e){
@@ -1623,6 +1736,7 @@ function buildInitialOnlineState(room){
   gameState.log.push({msg:`게임 시작! @${gameState.turn} 선공.`, type:'sys', side:null});
   window.MP._update('chetics_rooms/'+gameState.online.code, { status:'playing', state: serializeState() });
   Sound.play('start'); Sound.startMusic();
+  startRecording();
   renderLog(); render();
 }
 
@@ -1685,12 +1799,29 @@ function applyRemoteState(s){
       if(inBounds(r,c)) gameState.board[r][c]=s.board[k];
     }
   }
+  // 리플레이 기록: 초기 상태면 녹화 시작, 이후 수신마다 프레임 기록
+  if(gameState.phase==='playing' || gameState.phase==='over'){
+    if(!wasPlaying && gameState.phase==='playing'){
+      startRecording();
+    } else {
+      const mover = opponentSide(gameState.turn);   // 막 둔 쪽 = 현재 턴의 반대
+      let toCell=null; const lm=gameState.lastMove[mover];
+      if(lm){
+        for(let r=0;r<MAP_CONFIG.rows && !toCell;r++)
+          for(let c=0;c<MAP_CONFIG.cols;c++){
+            const u=gameState.board[r][c];
+            if(u && u.id===lm.unitId){ toCell={r,c}; break; }
+          }
+      }
+      recordFrame(toCell, mover);
+    }
+  }
   if(gameState.online){
     document.getElementById('onlineInfo').textContent =
       `방 ${gameState.online.code} · ${gameState.online.role==='host'?'호스트':'게스트'}`;
   }
   renderLog(); render();
-  if(gameState.phase==='over') showResult();
+  if(gameState.phase==='over'){ saveRecording(); showResult(); }
 }
 
 // 내 수를 원격에 반영
@@ -1701,6 +1832,160 @@ function pushState(){
 }
 
 function backToMenu(){ location.reload(); }
+
+/* =================================================================
+   리플레이 — 녹화 / 저장 / 재생
+   ================================================================= */
+const Rec = { frames:[], active:false, meta:{} };
+
+function startRecording(){
+  Rec.frames=[]; Rec.active=true;
+  Rec.meta={ mode:gameState.mode, date:Date.now(),
+             settings:JSON.parse(JSON.stringify(GAME_SETTINGS)),
+             mySide:gameState.mySide };
+  recordFrame(null,null);   // 초기 배치 프레임
+}
+// 현재 보드를 한 프레임으로 기록 (true 정체 포함 — 재생 시 전부 공개)
+function recordFrame(to, mover){
+  if(!Rec.active) return;
+  const b={};
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u) b[r+'_'+c]={k:u.key,o:u.owner,kills:u.kills||0,bv:u.bestVictim||null};
+    }
+  Rec.frames.push({ b, turn:gameState.turn, to:to||null, mover:mover||null });
+  if(Rec.frames.length>400) Rec.frames.shift();
+}
+function saveRecording(){
+  if(!Rec.active) return;
+  Rec.active=false;
+  const rec={ ...Rec.meta, winner:gameState.winner, reason:gameState.winReason, frames:Rec.frames };
+  const store=loadReplays();
+  const bucket = rec.mode==='online' ? 'online' : 'ai';
+  store[bucket].unshift(rec);
+  store[bucket]=store[bucket].slice(0,5);   // 최근 5개만
+  persistReplays(store);
+}
+function loadReplays(){
+  try{ const j=JSON.parse(localStorage.getItem('chetics_replays')||'{}'); return {ai:j.ai||[], online:j.online||[]}; }
+  catch(e){ return {ai:[], online:[]}; }
+}
+function persistReplays(s){ try{ localStorage.setItem('chetics_replays', JSON.stringify(s)); }catch(e){} }
+
+// --- 기록 목록 UI ---
+let _rlBucket='ai';
+function openReplayList(){
+  document.getElementById('modeOverlay').classList.remove('show');
+  _rlBucket='ai';
+  document.getElementById('rlTabAi').classList.add('active');
+  document.getElementById('rlTabOnline').classList.remove('active');
+  renderReplayList();
+  document.getElementById('replayListOverlay').classList.add('show');
+}
+function renderReplayList(){
+  const store=loadReplays();
+  const list=store[_rlBucket]||[];
+  const box=document.getElementById('replayList');
+  box.innerHTML='';
+  document.getElementById('replayEmpty').style.display = list.length?'none':'block';
+  list.forEach((rec,i)=>{
+    const win = rec.winner===rec.mySide;
+    const d=new Date(rec.date);
+    const dstr=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    const mapL=(MAP_PRESETS.find(m=>m.key===rec.settings.mapKey)||{}).label||rec.settings.mapKey;
+    const item=document.createElement('div');
+    item.className='replay-item';
+    item.innerHTML=`<div class="meta"><b>${dstr}</b> · ${mapL}
+        · <span class="${win?'res-win':'res-lose'}">${win?'승':'패'}</span>
+        · ${rec.frames.length}수</div>`;
+    const playB=document.createElement('button'); playB.textContent='▶ 재생';
+    const expB =document.createElement('button'); expB.textContent='⬇';  expB.title='파일로 저장';
+    const delB =document.createElement('button'); delB.textContent='🗑'; delB.title='삭제';
+    playB.onclick=()=>startReplay(rec);
+    expB.onclick=()=>exportReplay(rec);
+    delB.onclick=()=>{ const s=loadReplays(); s[_rlBucket].splice(i,1); persistReplays(s); renderReplayList(); };
+    item.append(playB, expB, delB);
+    box.appendChild(item);
+  });
+}
+function exportReplay(rec){
+  try{
+    const blob=new Blob([JSON.stringify(rec)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='chetics_replay_'+new Date(rec.date).toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }catch(e){ alert('내보내기 실패: '+e.message); }
+}
+
+// --- 리플레이 재생 ---
+const Replay = { rec:null, idx:0, playing:false, timer:null };
+function startReplay(rec){
+  Replay.rec=rec; Replay.idx=0; Replay.playing=true;
+  ['modeOverlay','lobbyOverlay','replayListOverlay','overlay'].forEach(id=>document.getElementById(id).classList.remove('show'));
+  // 기록된 설정으로 맵 복원
+  const s=rec.settings||{};
+  if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
+  if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
+  if(s.counts) GAME_SETTINGS.counts={...s.counts};
+  GAME_SETTINGS.killLog = !!s.killLog;
+  applyGameSettings();
+  gameState.mode='replay'; gameState.mySide='player'; gameState.online=null;
+  gameState.revealAll=true; gameState.phase='replay'; gameState.selected=null;
+  gameState.deckRemaining={}; gameState.log=[];
+  buildBoardUI(); sizeBoard(); renderLog();
+  document.getElementById('setupCard').style.display='none';
+  document.getElementById('replayBar').classList.add('show');
+  document.getElementById('rpSlider').max=String(rec.frames.length-1);
+  showReplayFrame();
+  if(Replay.timer) clearInterval(Replay.timer);
+  Replay.timer=setInterval(()=>{
+    if(!Replay.playing) return;
+    if(Replay.idx < Replay.rec.frames.length-1){ Replay.idx++; showReplayFrame(); }
+    else { Replay.playing=false; updateReplayPlayBtn(); }
+  }, 1100);
+  updateReplayPlayBtn();
+}
+function loadFrameToBoard(fr){
+  gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
+  for(const k in fr.b){
+    const [r,c]=k.split('_').map(Number);
+    const cd=fr.b[k];
+    if(!UNIT_BY_KEY[cd.k] || !inBounds(r,c)) continue;
+    const u=makeUnit(UNIT_BY_KEY[cd.k], cd.o);
+    u.kills=cd.kills||0; u.bestVictim=cd.bv||null;
+    gameState.board[r][c]=u;
+  }
+  gameState.turn=fr.turn;
+  gameState.lastMove={player:null,ai:null};
+}
+function showReplayFrame(){
+  const fr=Replay.rec.frames[Replay.idx];
+  loadFrameToBoard(fr);
+  render();
+  // 직전 이동 칸 강조 (재생은 player 시점=캔오니컬)
+  if(fr.to){
+    const cell=boardEl.children[fr.to.r*MAP_CONFIG.cols+fr.to.c];
+    if(cell) cell.classList.add(fr.mover==='player'?'lastmine':'lastai');
+  }
+  document.getElementById('rpSlider').value=String(Replay.idx);
+  document.getElementById('rpInfo').textContent=`${Replay.idx+1} / ${Replay.rec.frames.length}`;
+}
+function updateReplayPlayBtn(){ document.getElementById('rpPlay').textContent=Replay.playing?'⏸':'▶'; }
+function replayStep(d){
+  Replay.playing=false; updateReplayPlayBtn();
+  Replay.idx=Math.max(0, Math.min(Replay.rec.frames.length-1, Replay.idx+d));
+  showReplayFrame();
+}
+function replayClose(){
+  Replay.playing=false;
+  if(Replay.timer){ clearInterval(Replay.timer); Replay.timer=null; }
+  document.getElementById('replayBar').classList.remove('show');
+  backToMenu();
+}
 
 /* =================================================================
    이벤트 바인딩
@@ -1724,6 +2009,37 @@ document.getElementById('joinRoomBtn').addEventListener('click', joinRoom);
 document.getElementById('lobbyBack').addEventListener('click', ()=>{
   document.getElementById('lobbyOverlay').classList.remove('show');
   document.getElementById('modeOverlay').classList.add('show');
+});
+// 기록 / 리플레이
+document.getElementById('modeReplay').addEventListener('click', openReplayList);
+document.getElementById('replayListBack').addEventListener('click', ()=>{
+  document.getElementById('replayListOverlay').classList.remove('show');
+  document.getElementById('modeOverlay').classList.add('show');
+});
+document.getElementById('rlTabAi').addEventListener('click', ()=>{
+  _rlBucket='ai';
+  document.getElementById('rlTabAi').classList.add('active');
+  document.getElementById('rlTabOnline').classList.remove('active');
+  renderReplayList();
+});
+document.getElementById('rlTabOnline').addEventListener('click', ()=>{
+  _rlBucket='online';
+  document.getElementById('rlTabOnline').classList.add('active');
+  document.getElementById('rlTabAi').classList.remove('active');
+  renderReplayList();
+});
+document.getElementById('rpPlay').addEventListener('click', ()=>{
+  Replay.playing=!Replay.playing;
+  if(Replay.playing && Replay.idx>=Replay.rec.frames.length-1) Replay.idx=0;
+  if(Replay.playing) showReplayFrame();
+  updateReplayPlayBtn();
+});
+document.getElementById('rpPrev').addEventListener('click', ()=>replayStep(-1));
+document.getElementById('rpNext').addEventListener('click', ()=>replayStep(1));
+document.getElementById('rpClose').addEventListener('click', replayClose);
+document.getElementById('rpSlider').addEventListener('input', (e)=>{
+  Replay.playing=false; updateReplayPlayBtn();
+  Replay.idx=parseInt(e.target.value,10)||0; showReplayFrame();
 });
 // 오디오 토글
 document.getElementById('musicToggle').addEventListener('click', (e)=>{
