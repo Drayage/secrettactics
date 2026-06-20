@@ -629,23 +629,51 @@ const Sound = {
     n.connect(f); f.connect(g); g.connect(this.sfx);
     n.start(t0); n.stop(t0+dur);
   },
+  // 나무 말을 보드에 놓는 듯한 우디 타격음 (트랜지언트 클릭 + 빠른 피치 바디)
+  woodKnock(t0, freq, dur, gain){
+    if(!this.ctx) return;
+    // 바디: 빠르게 떨어지는 피치 + 로우패스로 둔탁하게
+    const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+    o.type='triangle';
+    o.frequency.setValueAtTime(freq*1.6, t0);
+    o.frequency.exponentialRampToValueAtTime(freq*0.7, t0+dur*0.6);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0+0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    const lp=this.ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=freq*3;
+    o.connect(lp); lp.connect(g); g.connect(this.sfx);
+    o.start(t0); o.stop(t0+dur+0.02);
+    // 트랜지언트: 아주 짧은 노이즈 클릭
+    const n=this.ctx.createBufferSource();
+    const len=Math.max(1, Math.floor(this.ctx.sampleRate*0.014));
+    const buf=this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+    n.buffer=buf;
+    const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=freq*2.2; bp.Q.value=0.7;
+    const ng=this.ctx.createGain(); ng.gain.value=gain*0.5;
+    n.connect(bp); bp.connect(ng); ng.connect(this.sfx);
+    n.start(t0); n.stop(t0+0.02);
+  },
   play(name){
     this.resume();
     if(!this.ctx || !this.sfxOn) return;
-    const t=this.ctx.currentTime, T=(f,o,d,opt)=>this.tone(f,t+o,d,opt);
+    const t=this.ctx.currentTime;
+    const T=(f,o,d,opt)=>this.tone(f,t+o,d,opt);
+    const K=(o,f,d,g)=>this.woodKnock(t+o, f, d, g);   // 우디 타격음
     switch(name){
-      case 'ui':      T(660,0,0.06,{type:'triangle',gain:0.16}); break;
-      case 'select':  T(523,0,0.07,{type:'triangle',gain:0.2}); T(784,0.05,0.08,{type:'triangle',gain:0.18}); break;
-      case 'place':   T(220,0,0.12,{type:'square',gain:0.2,to:120}); break;
-      case 'move':    T(440,0,0.09,{type:'sine',gain:0.16,to:560}); break;
-      case 'win':     [523,659,784].forEach((f,i)=>T(f,i*0.06,0.13,{type:'triangle',gain:0.22})); break;
-      case 'lose':    [392,330,262].forEach((f,i)=>T(f,i*0.07,0.15,{type:'sawtooth',gain:0.16})); break;
-      case 'clash':   this.noise(t,0.18,0.22); T(150,0,0.2,{type:'square',gain:0.22,to:80}); break;
-      case 'spy':     T(640,0,0.28,{type:'sine',gain:0.18,to:1000}); T(648,0,0.28,{type:'sine',gain:0.12,to:990}); break;
-      case 'start':   [262,330,392,523].forEach((f,i)=>T(f,i*0.09,0.22,{type:'triangle',gain:0.2})); break;
-      case 'victory': [523,659,784,1047].forEach((f,i)=>T(f,i*0.11,0.32,{type:'triangle',gain:0.24})); break;
-      case 'defeat':  [392,311,233].forEach((f,i)=>T(f,i*0.2,0.42,{type:'sawtooth',gain:0.2})); break;
-      case 'turn':    T(880,0,0.1,{type:'sine',gain:0.16}); break;
+      case 'ui':      K(0,1100,0.05,0.16); break;                                   // 가벼운 탭
+      case 'select':  K(0, 980,0.07,0.30); break;                                   // 말을 집어듦
+      case 'place':   K(0, 720,0.09,0.45); T(140,0,0.09,{type:'sine',gain:0.16,to:90}); break; // 묵직하게 놓음
+      case 'move':    K(0, 860,0.07,0.34); T(150,0,0.07,{type:'sine',gain:0.10,to:95}); break; // 인게임 이동
+      case 'clash':   K(0, 360,0.12,0.42); K(0.055,300,0.15,0.46); T(110,0,0.22,{type:'sine',gain:0.18,to:70}); break; // 말끼리 충돌
+      case 'win':     K(0, 560,0.08,0.30); T(294,0.03,0.5,{type:'triangle',gain:0.12}); T(392,0.06,0.55,{type:'triangle',gain:0.10}); break;
+      case 'lose':    K(0, 220,0.14,0.40); T(120,0,0.5,{type:'sine',gain:0.16,to:72}); break;
+      case 'spy':     T(175,0,0.55,{type:'sine',gain:0.16,to:235}); K(0,300,0.1,0.18); break; // 낮고 묘하게
+      case 'start':   K(0, 600,0.09,0.30); [131,196,262].forEach((f,i)=>T(f,0.04+i*0.04,0.7,{type:'sine',gain:0.11})); break;
+      case 'victory': [262,330,392,523].forEach((f,i)=>{ T(f,i*0.13,0.6,{type:'triangle',gain:0.16}); }); K(0,520,0.09,0.3); break;
+      case 'defeat':  [247,196,147].forEach((f,i)=>T(f,i*0.22,0.7,{type:'sine',gain:0.17,to:undefined})); K(0.02,180,0.16,0.34); break;
+      case 'turn':    K(0, 700,0.06,0.22); break;                                   // 부드러운 탭
     }
   },
   startMusic(){

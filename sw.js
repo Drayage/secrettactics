@@ -2,7 +2,7 @@
    - HTML 문서: network-first (항상 최신 index.html, 오프라인 시 캐시 폴백)
    - 정적 에셋(아이콘 등): cache-first
    - Firebase(CDN/RTDB) 요청은 통과(네트워크) */
-const CACHE = 'chetics-v4';
+const CACHE = 'chetics-v5';
 const SHELL = [
   './',
   './index.html',
