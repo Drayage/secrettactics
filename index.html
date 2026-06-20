@@ -629,51 +629,52 @@ const Sound = {
     n.connect(f); f.connect(g); g.connect(this.sfx);
     n.start(t0); n.stop(t0+dur);
   },
-  // 나무 말을 보드에 놓는 듯한 우디 타격음 (트랜지언트 클릭 + 빠른 피치 바디)
+  // 나무 말을 보드에 놓는 듯한 둔탁한 타격음 (사인 바디 + 부드러운 클릭, 고역 억제)
   woodKnock(t0, freq, dur, gain){
     if(!this.ctx) return;
-    // 바디: 빠르게 떨어지는 피치 + 로우패스로 둔탁하게
+    // 바디: 사인 + 빠른 피치 드롭, 낮은 로우패스로 둔탁/따뜻하게
     const o=this.ctx.createOscillator(), g=this.ctx.createGain();
-    o.type='triangle';
-    o.frequency.setValueAtTime(freq*1.6, t0);
-    o.frequency.exponentialRampToValueAtTime(freq*0.7, t0+dur*0.6);
+    o.type='sine';
+    o.frequency.setValueAtTime(freq*1.25, t0);
+    o.frequency.exponentialRampToValueAtTime(freq*0.55, t0+dur*0.7);
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(gain, t0+0.004);
+    g.gain.exponentialRampToValueAtTime(gain, t0+0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
-    const lp=this.ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=freq*3;
+    const lp=this.ctx.createBiquadFilter(); lp.type='lowpass';
+    lp.frequency.value=Math.min(1000, freq*2); lp.Q.value=0.2;
     o.connect(lp); lp.connect(g); g.connect(this.sfx);
-    o.start(t0); o.stop(t0+dur+0.02);
-    // 트랜지언트: 아주 짧은 노이즈 클릭
+    o.start(t0); o.stop(t0+dur+0.03);
+    // 트랜지언트: 로우패스로 깎은 아주 약한 클릭 (째지지 않게)
     const n=this.ctx.createBufferSource();
-    const len=Math.max(1, Math.floor(this.ctx.sampleRate*0.014));
+    const len=Math.max(1, Math.floor(this.ctx.sampleRate*0.012));
     const buf=this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d=buf.getChannelData(0);
     for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
     n.buffer=buf;
-    const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=freq*2.2; bp.Q.value=0.7;
-    const ng=this.ctx.createGain(); ng.gain.value=gain*0.5;
-    n.connect(bp); bp.connect(ng); ng.connect(this.sfx);
-    n.start(t0); n.stop(t0+0.02);
+    const lp2=this.ctx.createBiquadFilter(); lp2.type='lowpass'; lp2.frequency.value=850;
+    const ng=this.ctx.createGain(); ng.gain.value=gain*0.16;
+    n.connect(lp2); lp2.connect(ng); ng.connect(this.sfx);
+    n.start(t0); n.stop(t0+0.015);
   },
   play(name){
     this.resume();
     if(!this.ctx || !this.sfxOn) return;
     const t=this.ctx.currentTime;
     const T=(f,o,d,opt)=>this.tone(f,t+o,d,opt);
-    const K=(o,f,d,g)=>this.woodKnock(t+o, f, d, g);   // 우디 타격음
+    const K=(o,f,d,g)=>this.woodKnock(t+o, f, d, g);   // 둔탁한 타격음
     switch(name){
-      case 'ui':      K(0,1100,0.05,0.16); break;                                   // 가벼운 탭
-      case 'select':  K(0, 980,0.07,0.30); break;                                   // 말을 집어듦
-      case 'place':   K(0, 720,0.09,0.45); T(140,0,0.09,{type:'sine',gain:0.16,to:90}); break; // 묵직하게 놓음
-      case 'move':    K(0, 860,0.07,0.34); T(150,0,0.07,{type:'sine',gain:0.10,to:95}); break; // 인게임 이동
-      case 'clash':   K(0, 360,0.12,0.42); K(0.055,300,0.15,0.46); T(110,0,0.22,{type:'sine',gain:0.18,to:70}); break; // 말끼리 충돌
-      case 'win':     K(0, 560,0.08,0.30); T(294,0.03,0.5,{type:'triangle',gain:0.12}); T(392,0.06,0.55,{type:'triangle',gain:0.10}); break;
-      case 'lose':    K(0, 220,0.14,0.40); T(120,0,0.5,{type:'sine',gain:0.16,to:72}); break;
-      case 'spy':     T(175,0,0.55,{type:'sine',gain:0.16,to:235}); K(0,300,0.1,0.18); break; // 낮고 묘하게
-      case 'start':   K(0, 600,0.09,0.30); [131,196,262].forEach((f,i)=>T(f,0.04+i*0.04,0.7,{type:'sine',gain:0.11})); break;
-      case 'victory': [262,330,392,523].forEach((f,i)=>{ T(f,i*0.13,0.6,{type:'triangle',gain:0.16}); }); K(0,520,0.09,0.3); break;
-      case 'defeat':  [247,196,147].forEach((f,i)=>T(f,i*0.22,0.7,{type:'sine',gain:0.17,to:undefined})); K(0.02,180,0.16,0.34); break;
-      case 'turn':    K(0, 700,0.06,0.22); break;                                   // 부드러운 탭
+      case 'ui':      K(0, 560,0.05,0.16); break;                                    // 가벼운 탭
+      case 'select':  K(0, 460,0.07,0.30); break;                                    // 말을 집어듦
+      case 'place':   K(0, 300,0.12,0.50); T(95,0,0.12,{type:'sine',gain:0.16,to:62}); break; // 묵직하게 놓음
+      case 'move':    K(0, 380,0.09,0.34); T(110,0,0.09,{type:'sine',gain:0.10,to:70}); break; // 인게임 이동
+      case 'clash':   K(0, 180,0.14,0.50); K(0.06,150,0.17,0.50); T(80,0,0.24,{type:'sine',gain:0.18,to:55}); break; // 충돌
+      case 'win':     K(0, 330,0.10,0.34); T(262,0.04,0.55,{type:'sine',gain:0.13}); T(392,0.08,0.6,{type:'sine',gain:0.10}); break;
+      case 'lose':    K(0, 160,0.16,0.42); T(98,0,0.55,{type:'sine',gain:0.16,to:62}); break;
+      case 'spy':     T(150,0,0.6,{type:'sine',gain:0.16,to:210}); K(0,240,0.1,0.16); break; // 낮고 묘하게
+      case 'start':   K(0, 360,0.10,0.30); [131,196,262].forEach((f,i)=>T(f,0.05+i*0.05,0.8,{type:'sine',gain:0.11})); break;
+      case 'victory': [196,262,330,392].forEach((f,i)=>T(f,i*0.14,0.7,{type:'sine',gain:0.15})); K(0,330,0.1,0.3); break;
+      case 'defeat':  [233,175,131].forEach((f,i)=>T(f,i*0.24,0.8,{type:'sine',gain:0.17})); K(0.02,150,0.18,0.34); break;
+      case 'turn':    K(0, 340,0.07,0.22); break;                                    // 부드러운 탭
     }
   },
   startMusic(){
