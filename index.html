@@ -1422,22 +1422,22 @@ function log(msg, type='sys', side=null, only=null){
 }
 // 로그 메시지를 내 시점으로 치환 (순수함수 — 테스트용)
 //  @!<side>:<label> → 항상 라벨 공개   /   @<side>:<label> → 내것만 라벨, 상대는 ?   /   @<side> → 아군/상대
-function localizeLogMsg(msg, mySide){
+function localizeLogMsg(msg, mySide, revealAll){
   const word=(s)=> s===mySide ? '아군' : '상대';
   return msg
     .replace(/@!(player|ai):(\S+)/g, (_,s,l)=> `${word(s)} ${l}`)
-    .replace(/@(player|ai):(\S+)/g,  (_,s,l)=> s===mySide ? `${word(s)} ${l}` : `${word(s)} ?`)
+    .replace(/@(player|ai):(\S+)/g,  (_,s,l)=> (revealAll || s===mySide) ? `${word(s)} ${l}` : `${word(s)} ?`)
     .replace(/@(player|ai)\b/g,      (_,s)=> word(s));
 }
-// 로그 한 줄을 내 시점으로 치환해 DOM에 추가 (only가 내 진영이 아니면 스킵)
+// 로그 한 줄을 내 시점으로 치환해 DOM에 추가 (only가 내 진영이 아니면 스킵 — 리플레이는 전부 표시)
 function appendLogEntry(entry){
-  if(entry.only && entry.only!==gameState.mySide) return;
+  if(entry.only && entry.only!==gameState.mySide && !gameState.revealAll) return;
   const box=document.getElementById('log');
   const div=document.createElement('div');
   let cls='entry '+(entry.type==='combat'?'':entry.type);
   if(entry.side) cls+=' '+(entry.side===gameState.mySide?'win':'lose');
   div.className=cls.trim();
-  div.innerHTML=localizeLogMsg(entry.msg, gameState.mySide);
+  div.innerHTML=localizeLogMsg(entry.msg, gameState.mySide, gameState.revealAll);
   box.appendChild(div);
   box.scrollTop=box.scrollHeight;
 }
@@ -1948,7 +1948,8 @@ function recordFrame(to, mover){
       const u=gameState.board[r][c];
       if(u) b[r+'_'+c]={k:u.key,o:u.owner,kills:u.kills||0,bv:u.bestVictim||null};
     }
-  Rec.frames.push({ b, turn:gameState.turn, to:to||null, mover:mover||null });
+  Rec.frames.push({ b, turn:gameState.turn, to:to||null, mover:mover||null,
+                    log: gameState.log.slice(-30) });   // 그 시점까지의 로그(최근 30)
   if(Rec.frames.length>400) Rec.frames.shift();
 }
 function saveRecording(){
@@ -2082,6 +2083,8 @@ function showReplayFrame(playSound){
     }
   }
   loadFrameToBoard(fr);
+  gameState.log = fr.log || [];     // 그 시점까지의 전투 로그
+  renderLog();
   render();
   // 직전 이동 칸 강조 (재생은 player 시점=캔오니컬)
   if(fr.to){
