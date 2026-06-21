@@ -915,6 +915,53 @@ window.addEventListener('resize', sizeBoard);
 // 장애물 칸 여부
 function isBlocked(r,c){ return MAP_CONFIG.blocked.some(b=>b.r===r&&b.c===c); }
 
+// 왕이 폭탄/벽으로 완전히 봉쇄됐는지 (한 방향이라도 '폭탄·장애물·보드끝'이 아니면 OK)
+function findKing(side){
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const u=gameState.board[r][c];
+      if(u && u.owner===side && u.role==='king') return {r,c};
+    }
+  return null;
+}
+function kingSealed(side){
+  const k=findKing(side); if(!k) return false;
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  for(const [dr,dc] of dirs){
+    const nr=k.r+dr, nc=k.c+dc;
+    if(!inBounds(nr,nc)) continue;          // 보드 끝 = 막힘
+    if(isBlocked(nr,nc)) continue;          // 장애물 = 막힘
+    const u=gameState.board[nr][nc];
+    if(u && u.isGas) continue;              // 폭탄 = 막힘
+    return false;                           // 열린(또는 일반 유닛) 방향 존재
+  }
+  return true;                              // 모든 방향이 폭탄/벽/끝 → 봉쇄
+}
+// AI 배치가 자기 왕을 폭탄으로 가뒀으면 인접 폭탄 하나를 빈 칸으로 옮겨 해제
+function unsealAIKing(side){
+  let guard=0;
+  while(kingSealed(side) && guard++<8){
+    const k=findKing(side); if(!k) break;
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    let bombCell=null;
+    for(const [dr,dc] of dirs){
+      const nr=k.r+dr, nc=k.c+dc;
+      if(inBounds(nr,nc)){ const u=gameState.board[nr][nc]; if(u && u.isGas){ bombCell={r:nr,c:nc,u}; break; } }
+    }
+    if(!bombCell) break;
+    // 같은 진영 구역의 빈 칸(왕 비인접) 찾기
+    const empties=[];
+    for(let r=0;r<MAP_CONFIG.rows;r++)
+      for(let c=0;c<MAP_CONFIG.cols;c++)
+        if(isZoneOf(side,r) && !gameState.board[r][c] && !isBlocked(r,c)
+           && !(Math.abs(r-k.r)+Math.abs(c-k.c)===1)) empties.push({r,c});
+    if(!empties.length) break;
+    const dst=empties[Math.floor(Math.random()*empties.length)];
+    gameState.board[dst.r][dst.c]=bombCell.u;
+    gameState.board[bombCell.r][bombCell.c]=null;
+  }
+}
+
 function buildDeckUI(){
   const grid = document.getElementById('deckGrid');
   grid.innerHTML = '';
@@ -964,6 +1011,7 @@ function placeAIUnits(){
   const remainingCells = [...backCells, ...otherCells].sort(()=>Math.random()-0.5);
   rest.forEach(u=>{ const cell = remainingCells.shift(); gameState.board[cell.r][cell.c] = u; });
 
+  unsealAIKing('ai');   // 왕을 폭탄으로 가뒀으면 해제
   gameState.aiPlaced = true;
   log(`AI가 ${totalUnits()}마리 유닛을 상단 진영에 비밀리에 배치했습니다.`, 'sys');
 }
@@ -1047,6 +1095,11 @@ function onSetupClick(r,c){
    ================================================================= */
 function startGame(){
   if(placedCount() < totalUnits()) return;
+  if(kingSealed(gameState.mySide)){
+    Sound.play('lose');
+    alert('왕을 폭탄으로 완전히 가둘 수 없습니다. 적어도 한 방향은 열어두세요.');
+    return;
+  }
   if(gameState.mode==='online') return onlineReady();   // 온라인은 '준비완료'로 처리
   if(!gameState.aiPlaced) placeAIUnits();
   gameState.phase = 'playing';
@@ -1985,7 +2038,8 @@ function startReplay(rec){
   document.getElementById('setupCard').style.display='none';
   document.getElementById('replayBar').classList.add('show');
   document.getElementById('rpSlider').max=String(rec.frames.length-1);
-  showReplayFrame();
+  Sound.play('start'); Sound.startMusic();
+  showReplayFrame(false);
   scheduleReplayTick();
   updateReplayPlayBtn();
 }
@@ -1993,7 +2047,7 @@ function scheduleReplayTick(){
   if(Replay.timer) clearTimeout(Replay.timer);
   Replay.timer=setTimeout(()=>{
     if(Replay.playing){
-      if(Replay.idx < Replay.rec.frames.length-1){ Replay.idx++; showReplayFrame(); }
+      if(Replay.idx < Replay.rec.frames.length-1){ Replay.idx++; showReplayFrame(true); }
       else { Replay.playing=false; updateReplayPlayBtn(); }
     }
     if(gameState.phase==='replay') scheduleReplayTick();   // 재생 중이 아니어도 폴링 유지(속도 변경 반영)
@@ -2012,8 +2066,21 @@ function loadFrameToBoard(fr){
   gameState.turn=fr.turn;
   gameState.lastMove={player:null,ai:null};
 }
-function showReplayFrame(){
+function showReplayFrame(playSound){
   const fr=Replay.rec.frames[Replay.idx];
+  // 프레임 전환 효과음 (앞으로 진행할 때만)
+  if(playSound && Replay.idx>0){
+    const prev=Replay.rec.frames[Replay.idx-1];
+    const pc=Object.keys(prev.b||{}).length, cc=Object.keys(fr.b||{}).length;
+    if(cc < pc && fr.to){   // 말이 줄었으면 전투
+      Sound.play('clash');
+      const wcell=fr.b[fr.to.r+'_'+fr.to.c];
+      const winner = wcell ? wcell.o : opponentSide(fr.mover);   // 점령했으면 그 주인, 아니면 방어자
+      setTimeout(()=>Sound.play(winner==='player'?'win':'lose'),150);
+    } else {
+      Sound.play('move');
+    }
+  }
   loadFrameToBoard(fr);
   render();
   // 직전 이동 칸 강조 (재생은 player 시점=캔오니컬)
@@ -2027,12 +2094,14 @@ function showReplayFrame(){
 function updateReplayPlayBtn(){ document.getElementById('rpPlay').textContent=Replay.playing?'⏸':'▶'; }
 function replayStep(d){
   Replay.playing=false; updateReplayPlayBtn();
+  const prevIdx=Replay.idx;
   Replay.idx=Math.max(0, Math.min(Replay.rec.frames.length-1, Replay.idx+d));
-  showReplayFrame();
+  showReplayFrame(Replay.idx===prevIdx+1);   // 다음으로 한 칸 갈 때만 소리
 }
 function replayClose(){
   Replay.playing=false;
   if(Replay.timer){ clearTimeout(Replay.timer); Replay.timer=null; }
+  Sound.stopMusic();
   document.getElementById('replayBar').classList.remove('show');
   backToMenu();
 }
@@ -2099,7 +2168,7 @@ document.getElementById('rlTabOnline').addEventListener('click', ()=>{
 document.getElementById('rpPlay').addEventListener('click', ()=>{
   Replay.playing=!Replay.playing;
   if(Replay.playing && Replay.idx>=Replay.rec.frames.length-1) Replay.idx=0;
-  if(Replay.playing) showReplayFrame();
+  if(Replay.playing) showReplayFrame(false);
   updateReplayPlayBtn();
 });
 document.getElementById('rpPrev').addEventListener('click', ()=>replayStep(-1));
@@ -2122,7 +2191,7 @@ document.querySelectorAll('[data-comp]').forEach(btn=>{
 });
 document.getElementById('rpSlider').addEventListener('input', (e)=>{
   Replay.playing=false; updateReplayPlayBtn();
-  Replay.idx=parseInt(e.target.value,10)||0; showReplayFrame();
+  Replay.idx=parseInt(e.target.value,10)||0; showReplayFrame(false);
 });
 // 오디오 토글
 document.getElementById('musicToggle').addEventListener('click', (e)=>{
