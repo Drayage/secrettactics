@@ -1072,6 +1072,7 @@ function onSetupClick(r,c){
     gameState.board[r][c] = null;
     Sound.play('ui');
     render();
+    saveSession();
     return;
   }
   // 빈 내 진영 칸 -> 선택한 유닛 배치
@@ -1088,6 +1089,7 @@ function onSetupClick(r,c){
   if(gameState.deckRemaining[key]===0) gameState.selectedDeckKey = null;
   Sound.play('place');
   render();
+  saveSession();
 }
 
 /* =================================================================
@@ -1110,6 +1112,7 @@ function startGame(){
   Sound.play('start'); Sound.startMusic();
   startRecording();
   render();
+  saveSession();
   if(gameState.turn==='ai') setTimeout(aiTurn, 800);
 }
 
@@ -1218,6 +1221,7 @@ function doMove(from, to, mover){
     recordMove(true);
     Sound.play('move');
     recordFrame(to, mover);
+    saveSession();
     return;
   }
 
@@ -1266,6 +1270,7 @@ function doMove(from, to, mover){
 
   recordFrame(to, mover);   // 게임오버 저장 전에 마지막 프레임 기록
   checkWin();
+  saveSession();            // 게임오버면 phase가 over라 저장 스킵(endGame이 clear)
 }
 
 // 로그용 유닛 표기: @<side>:<label> (렌더 시 시점에 맞춰 — 내 것만 라벨, 상대는 ?)
@@ -1311,6 +1316,7 @@ function endGame(winner, reason){
   Sound.stopMusic();
   Sound.play(winner===gameState.mySide ? 'victory' : 'defeat');
   saveRecording();
+  clearSession();                              // 종료된 게임은 복원하지 않음
   if(gameState.mode==='online') pushState();   // 결과 동기화
   render();
   showResult();
@@ -1832,6 +1838,7 @@ function buildInitialOnlineState(room){
   Sound.play('start'); Sound.startMusic();
   startRecording();
   renderLog(); render();
+  saveSession();
 }
 
 function onlineReady(){
@@ -1848,6 +1855,7 @@ function onlineReady(){
   const btn=document.getElementById('startBtn');
   btn.disabled=true; btn.textContent='상대 대기 중…';
   log('준비 완료 — 상대를 기다립니다…','sys');
+  saveSession();
 }
 
 // gameState → 직렬화 (RTDB 저장용; board는 "r_c" 맵)
@@ -1915,7 +1923,8 @@ function applyRemoteState(s){
       `방 ${gameState.online.code} · ${gameState.online.role==='host'?'호스트':'게스트'}`;
   }
   renderLog(); render();
-  if(gameState.phase==='over'){ saveRecording(); showResult(); }
+  if(gameState.phase==='over'){ saveRecording(); clearSession(); showResult(); }
+  else saveSession();
 }
 
 // 내 수를 원격에 반영
@@ -1925,7 +1934,85 @@ function pushState(){
   window.MP._set('chetics_rooms/'+gameState.online.code+'/state', serializeState());
 }
 
-function backToMenu(){ location.reload(); }
+function backToMenu(){ clearSession(); location.reload(); }
+
+/* =================================================================
+   세션 유지 — 새로고침해도 진행 중인 게임 복원
+   ================================================================= */
+function saveSession(){
+  try{
+    if(gameState.mode!=='ai' && gameState.mode!=='online') return;
+    if(gameState.phase!=='setup' && gameState.phase!=='playing') return;
+    const sess={
+      v:1, mode:gameState.mode, mySide:gameState.mySide, online:gameState.online,
+      settings:GAME_SETTINGS, deckRemaining:gameState.deckRemaining, aiPlaced:gameState.aiPlaced,
+      state:serializeState(),
+      rec:{ frames:Rec.frames, active:Rec.active, meta:Rec.meta },
+    };
+    localStorage.setItem('chetics_session', JSON.stringify(sess));
+  }catch(e){}
+}
+function clearSession(){ try{ localStorage.removeItem('chetics_session'); }catch(e){} }
+function loadSession(){ try{ return JSON.parse(localStorage.getItem('chetics_session')||'null'); }catch(e){ return null; } }
+
+// 직렬화 상태를 gameState에 적용 (board 유닛 객체에 id 등 포함)
+function loadStateInto(s){
+  gameState.seq=s.seq||0;
+  gameState.phase=s.phase;
+  gameState.turn=s.turn;
+  gameState.winner=s.winner||null;
+  gameState.winReason=s.winReason||null;
+  gameState.lastMove=s.lastMove||{player:null,ai:null};
+  gameState.log=s.log||[];
+  gameState.selected=null;
+  gameState.revealAll=false;
+  gameState.board=Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
+  let maxId=0;
+  if(s.board) for(const k in s.board){
+    const [r,c]=k.split('_').map(Number);
+    if(inBounds(r,c)){ const u=s.board[k]; gameState.board[r][c]=u; if(u && u.id>maxId) maxId=u.id; }
+  }
+  gameState.unitSeq=Math.max(gameState.unitSeq||0, maxId);
+}
+
+// 부팅 시 저장된 세션이 있으면 복원
+function restoreSession(){
+  const sess=loadSession();
+  if(!sess || !sess.state) return false;
+  if(sess.state.phase!=='setup' && sess.state.phase!=='playing') return false;
+  try{
+    Object.assign(GAME_SETTINGS, sess.settings||{});
+    gameState.mode=sess.mode; gameState.mySide=sess.mySide; gameState.online=sess.online||null;
+    applyGameSettings();
+    gameState.deckRemaining=sess.deckRemaining||{};
+    gameState.aiPlaced=!!sess.aiPlaced;
+    loadStateInto(sess.state);
+    if(sess.rec){ Rec.frames=sess.rec.frames||[]; Rec.active=!!sess.rec.active; Rec.meta=sess.rec.meta||{}; }
+    document.getElementById('modeOverlay').classList.remove('show');
+    buildDeckUI(); buildBoardUI(); sizeBoard(); renderLog(); render();
+    document.getElementById('setupCard').style.display = gameState.phase==='setup' ? '' : 'none';
+    if(gameState.mode==='online'){
+      document.getElementById('startBtn').textContent='준비 완료';
+      resumeOnline();
+    } else if(gameState.phase==='playing' && gameState.turn==='ai'){
+      setTimeout(aiTurn, 800);
+    }
+    log('이전 게임을 이어서 진행합니다.', 'sys');
+    return true;
+  }catch(e){ clearSession(); return false; }
+}
+
+// 온라인 게임 새로고침 후 방에 재접속
+async function resumeOnline(){
+  const code=gameState.online && gameState.online.code;
+  if(!code) return;
+  document.getElementById('onlineInfo').textContent=`방 ${code} · ${gameState.online.role==='host'?'호스트':'게스트'}`;
+  try{
+    if(!window.MP.configured()) return;     // 설정 없으면 로컬 화면만 유지
+    await window.MP.init();
+    if(!_roomSubscribed){ window.MP._onValue('chetics_rooms/'+code, handleRoom); _roomSubscribed=true; }
+  }catch(e){ /* 오프라인이면 로컬 상태만 표시 */ }
+}
 
 /* =================================================================
    리플레이 — 녹화 / 저장 / 재생
@@ -2213,6 +2300,7 @@ if('serviceWorker' in navigator){
 }
 
 applyGameSettings();  // 기본 설정(MAP_CONFIG) 반영 — 모드 선택 후 initGame
+restoreSession();     // 진행 중이던 게임이 있으면 이어서 복원 (없으면 모드 메뉴 유지)
 </script>
 </body>
 </html>
