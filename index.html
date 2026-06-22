@@ -1756,7 +1756,7 @@ async function createRoom(){
       status:'placing', settings:GAME_SETTINGS, seats:{host:window.MP.uid()},
       ready:{player:false, ai:false}, seq:0, ts:Date.now()
     });
-    window.MP._onDisconnectRemove('chetics_rooms/'+code);  // 호스트 이탈 시 방 정리
+    // 새로고침/잠깐 끊김에도 방을 유지하기 위해 onDisconnect 자동 삭제는 사용하지 않음
     enterOnline(code,'host','player');
   }catch(e){
     console.error('createRoom 실패:', e);
@@ -1780,7 +1780,6 @@ async function joinRoom(){
     if(!room){ st.textContent='방을 찾을 수 없습니다. (코드 확인)'; return; }
     if(room.seats && room.seats.guest){ st.textContent='이미 가득 찬 방입니다.'; return; }
     await window.MP._update('chetics_rooms/'+code+'/seats', {guest:window.MP.uid()});
-    window.MP._onDisconnectRemove('chetics_rooms/'+code+'/seats/guest');
     const s=room.settings||{};
     if(s.mapKey) GAME_SETTINGS.mapKey=s.mapKey;
     if(s.obstacleKey) GAME_SETTINGS.obstacleKey=s.obstacleKey;
