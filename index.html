@@ -1360,28 +1360,73 @@ function aiValue(u){
   if(u.isStar) return Math.min(20, u.power);
   return Math.max(1, u.power||1);        // 숫자
 }
-// (rr,cc)에 있는 내 유닛 u가 인접 플레이어 유닛에게 다음 턴 잡히는가
-function aiInDanger(u, rr, cc){
-  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
-  for(const [dr,dc] of dirs){
-    const nr=rr+dr, nc=cc+dc;
-    if(!inBounds(nr,nc)) continue;
-    const pu=gameState.board[nr][nc];
-    if(pu && pu.owner==='player' && pu.movable && resolveCombat(pu, u)==='attacker') return true;
-  }
-  return false;
-}
 
+/* AI는 '블라인드'로 둔다 — 정당하게 아는 정보만 사용:
+   · 자기 말은 전부 앎
+   · 드러난 적 말(revealedTo==='ai')만 정체를 앎
+   · 그 외 적 말은 '남은 덱 구성'으로 승률을 추정
+   허용되는 추론: 왕은 모든 말에게 패배 / 움직인 말(자기 진영 밖)은 폭탄·왕이 아님 */
 function aiTurn(){
   if(gameState.phase!=='playing' || gameState.turn!=='ai') return;
 
   const myKing = findKing('ai');
   const myUnits = [];
+  // 적 말 중 드러난(정체 아는) 것들의 타입별 개수
+  const revealedCount={}, deckCount={};
+  UNIT_CONFIG.forEach(d=>{ deckCount[d.key]=d.count; });
   for(let r=0;r<MAP_CONFIG.rows;r++)
     for(let c=0;c<MAP_CONFIG.cols;c++){
       const u=gameState.board[r][c];
-      if(u && u.owner==='ai' && u.movable) myUnits.push({u,r,c});
+      if(!u) continue;
+      if(u.owner==='ai' && u.movable) myUnits.push({u,r,c});
+      if(u.owner==='player' && u.revealedTo==='ai') revealedCount[u.key]=(revealedCount[u.key]||0)+1;
     }
+
+  // (pr,pc)의 알 수 없는 적 말이 가질 수 있는 타입 분포. attackerOnly면 이동가능(폭탄·왕 제외)만.
+  function typeDist(pr,pc, attackerOnly){
+    const moved = pr < MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows;  // 자기 진영 밖 = 움직인 말
+    const dist=[];
+    UNIT_CONFIG.forEach(d=>{
+      if((attackerOnly||moved) && (d.role==='king'||d.isGas)) return;  // 폭탄·왕은 공격 못함/안 움직임
+      const w=(deckCount[d.key]||0)-(revealedCount[d.key]||0);
+      if(w>0) dist.push({def:d, w});
+    });
+    return dist;
+  }
+  // 내 말 u가 (pr,pc)의 적 말 pu를 이길 확률. att=true: 내가 공격 / false: 적이 나를 공격
+  function pWin(u, pu, pr, pc, att){
+    if(pu.revealedTo==='ai'){
+      const res = att ? resolveCombat(u,pu) : resolveCombat(pu,u);
+      return (att ? res==='attacker' : res==='defender') ? 1 : 0;
+    }
+    const dist=typeDist(pr,pc, !att); let tot=0, win=0;
+    dist.forEach(({def,w})=>{ tot+=w;
+      const res = att ? resolveCombat(u,def) : resolveCombat(def,u);
+      if(att ? res==='attacker' : res==='defender') win+=w;
+    });
+    return tot ? win/tot : 0.5;
+  }
+  // (pr,pc) 적 말을 잡았을 때 기대 가치
+  function estVal(pu,pr,pc){
+    if(pu.revealedTo==='ai') return aiValue(pu);
+    const dist=typeDist(pr,pc,false); let tot=0,sum=0;
+    dist.forEach(({def,w})=>{ tot+=w; sum+=w*aiValue(def); });
+    return tot ? sum/tot : 5;
+  }
+  // 내 말 u가 (rr,cc)에 있을 때 다음 턴 잡힐 위험확률(인접 적의 추정 공격 성공률 최댓값)
+  function dangerProb(u, rr, cc){
+    let worst=0;
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of dirs){
+      const nr=rr+dr, nc=cc+dc;
+      if(!inBounds(nr,nc)) continue;
+      const pu=gameState.board[nr][nc];
+      if(pu && pu.owner==='player'){
+        worst=Math.max(worst, 1 - pWin(u, pu, nr, nc, false));  // 1 - (내가 막을 확률)
+      }
+    }
+    return worst;
+  }
 
   let best=null, bestScore=-Infinity;
   for(const {u,r,c} of myUnits){
@@ -1389,21 +1434,18 @@ function aiTurn(){
       const target = gameState.board[m.r][m.c];
       let score;
       if(target){
-        const res = resolveCombat(u, target);
-        if(res!=='attacker'){ score = -100 - aiValue(u); }      // 지는 공격은 회피
-        else if(target.role==='king'){ score = 1e6; }           // 플레이어 왕 포획 = 즉시 승리
-        else {
-          score = 100 + aiValue(target);                        // 포획 이득
-          if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 5000; // 내 왕 위협 제거
-          if(aiInDanger(u, m.r, m.c)) score -= aiValue(u)*0.8;  // 되잡힐 위험
-        }
+        const pw = pWin(u, target, m.r, m.c, true);
+        const ev = estVal(target, m.r, m.c);
+        score = pw*(100+ev) - (1-pw)*aiValue(u);          // 기대 포획이득 - 패배 손실
+        // 내 왕 인접의 적은 정체와 무관하게 치명(왕은 모두에게 패배) → 제거 최우선
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 300;
+        score -= dangerProb(u, m.r, m.c)*aiValue(u)*0.6;  // 되잡힐 위험
       } else {
-        // 빈 칸 이동: 플레이어 진영(아래)으로 전진 + 위험 회피
-        score = (m.r - r) * (1.2 + (10 - Math.min(10, aiValue(u)))*0.15);
-        if(aiInDanger(u, m.r, m.c)) score -= aiValue(u)*1.0;     // 위험한 칸으로 들어가지 않기
-        if(aiInDanger(u, r, c) && !aiInDanger(u, m.r, m.c)) score += aiValue(u)*0.7; // 위험 탈출
-        // 내 왕 곁을 너무 비우지 않게 약한 보너스(왕 근처 수비)
-        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3;
+        score = (m.r - r) * (1.2 + (10 - Math.min(10, aiValue(u)))*0.15);  // 전진(아래로)
+        const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c);
+        score -= dNew*aiValue(u);                          // 위험한 칸 회피
+        if(dOld>dNew) score += (dOld-dNew)*aiValue(u)*0.7; // 위험 탈출
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3; // 왕 수비
       }
       score += Math.random()*0.4;   // 동점 흔들기(루프 방지)
       if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
