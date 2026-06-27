@@ -1502,6 +1502,20 @@ function aiTurn(){
     }
     return false;
   }
+  // m 인접 아군 타입 (RPS 커플 판정: 별>숫자>별킬러>별)
+  function adjFriendly(m, u){
+    let hasNum=false, hasStrong=false;
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of dirs){
+      const nr=m.r+dr, nc=m.c+dc;
+      if(!inBounds(nr,nc)) continue;
+      const au=gameState.board[nr][nc];
+      if(!au || au.owner!=='ai' || !au.movable || au===u) continue;
+      if(au.isStar || au.role==='starkiller') hasStrong=true;
+      else if(au.power>0) hasNum=true;   // 일반 숫자
+    }
+    return {hasNum, hasStrong};
+  }
 
   // 반복/춤추기 감지: 최근 AI 이동 히스토리
   const hist = gameState.aiHist || (gameState.aiHist=[]);
@@ -1529,15 +1543,21 @@ function aiTurn(){
         score -= pw * dangerProb(u, m.r, m.c, {r,c})*aiValue(u)*0.6;   // 이기면 그다음(되잡힘)
         if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200; // 왕 위협 제거(디코이라도)
       } else {
-        const sup = supportVal(m.r,m.c,u);                 // 이동 후 뒤를 받쳐줄 아군 가치
-        const supported = sup>=8;                          // 별/별킬러급 백업이 있으면 미끼 전개 OK
+        const isStar = u.isStar, isSK = u.role==='starkiller', isNum = (!isStar && !isSK && u.power>0);
+        const nb = adjFriendly(m, u);
+        // RPS 커플: 별/별킬러는 '숫자' 호위가 약점(별킬러)을 막아줌 / 숫자는 강한 백업이 되잡아줌
+        const coupled = (isStar && nb.hasNum) || (isSK && nb.hasNum) || (isNum && nb.hasStrong);
+        const supported = coupled || supportVal(m.r,m.c,u)>=8;
         score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12) * (opening?1.6:1); // 전진
         const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c,null);
-        const dw = babysat ? 0.3 : (supported ? 0.3 : 0.6); // 백업 있으면 위험 감수(되잡기 가능)
+        const dw = babysat ? 0.3 : (supported ? 0.3 : 0.6); // 커플/백업 있으면 위험 감수(되잡기 가능)
         score -= dNew*aiValue(u)*dw;
         if(dOld>dNew && !babysat) score += (dOld-dNew)*aiValue(u)*0.5; // 위험 탈출
-        if(supported && aiValue(u)<=4) score += 2.2;       // 약한 말이 백업 받으며 전진(에스코트 프로브)
-        if(aiValue(u)>=9 && followsProbe(u,m)) score += 2.0; // 강한 말이 앞선 약한 아군을 호위
+        // 커플 형성/유지 보너스 (숫자-별3, 9-별킬러 등)
+        if(isStar && nb.hasNum) score += 2.6;   // 별 + 숫자 호위(별킬러 대비)
+        if(isSK && nb.hasNum) score += 2.2;     // 별킬러 + 숫자 커플
+        if(isNum && nb.hasStrong) score += 1.8; // 숫자가 강한 말을 호위(되잡기 백업)
+        if(aiValue(u)>=9 && followsProbe(u,m)) score += 1.5; // 강한 말이 앞선 약한 아군을 따라붙음
         if(!u.hasMoved && !opening) score -= 0.2;
         if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3; // 왕 수비
         if(recentKey(u.id,m.r,m.c)) score -= aiValue(u)*0.5 + 3;       // 재방문(춤추기) 감점
