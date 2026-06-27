@@ -872,6 +872,8 @@ function initGame(){
   gameState.revealAll = false;
   gameState.seq = 0;
   gameState.lastMove = { player:null, ai:null };
+  gameState.aiHist = [];          // AI 이동 히스토리(춤추기/반복 감지)
+  gameState.aiMoveCount = 0;      // AI가 둔 수(초반 판단)
   gameState.log = [];
   gameState.board = Array.from({length:MAP_CONFIG.rows},()=>Array(MAP_CONFIG.cols).fill(null));
   gameState.deckRemaining = Object.fromEntries(UNIT_CONFIG.map(u=>[u.key,u.count]));
@@ -993,33 +995,42 @@ function selectDeck(key){
 }
 
 function placeAIUnits(){
-  // AI 유닛을 상단 배치 구역에 랜덤 배치. '왕'/'폭탄'은 가급적 맨 윗줄(row 0) 깊숙이.
-  const cells = [];
+  // 진형 배치 — 뒷줄(row0): 왕·폭탄(은닉) / 중간: 핵심 강함(별·별킬러, 백업라인) / 앞줄: 소모성 스크린
+  const avail = [];
   for(let r=0;r<MAP_CONFIG.aiZoneRows;r++)
-    for(let c=0;c<MAP_CONFIG.cols;c++) if(!isBlocked(r,c)) cells.push({r,c});
+    for(let c=0;c<MAP_CONFIG.cols;c++) if(!isBlocked(r,c)) avail.push({r,c});
 
-  // 유닛 풀 생성
   const pool = [];
   UNIT_CONFIG.forEach(def=>{ for(let i=0;i<def.count;i++) pool.push(makeUnit(def,'ai')); });
 
-  // 숨길 유닛(왕/가스)과 일반 유닛 분리
-  const hide = pool.filter(u=>u.role==='king'||u.role==='gas');
-  const rest = pool.filter(u=>!(u.role==='king'||u.role==='gas'));
+  const hide  = pool.filter(u=>u.role==='king'||u.role==='gas');               // 뒷줄 은닉
+  const core  = pool.filter(u=>u.isStar||u.role==='starkiller');               // 중간 코어
+  const others= pool.filter(u=>!(u.role==='king'||u.role==='gas'||u.isStar||u.role==='starkiller'));
+  const front = MAP_CONFIG.aiZoneRows-1;     // 앞줄(플레이어 쪽)
+  const mid   = Math.floor((MAP_CONFIG.aiZoneRows-1)/2);
 
-  // 가중치: row 0(맨 위) 셀을 우선 hide 유닛에게 배정
-  const backCells = cells.filter(x=>x.r===0).sort(()=>Math.random()-0.5);
-  const otherCells = cells.filter(x=>x.r!==0).sort(()=>Math.random()-0.5);
-
-  hide.forEach(u=>{
-    const cell = backCells.length ? backCells.shift() : otherCells.shift();
-    gameState.board[cell.r][cell.c] = u;
-  });
-  const remainingCells = [...backCells, ...otherCells].sort(()=>Math.random()-0.5);
-  rest.forEach(u=>{ const cell = remainingCells.shift(); gameState.board[cell.r][cell.c] = u; });
+  // 선호도(낮을수록 우선) + 약간의 무작위로 패턴 노출 방지
+  const assign = (units, pref)=>{
+    units.forEach(u=>{
+      avail.sort((a,b)=> (pref(a)+Math.random()*0.7) - (pref(b)+Math.random()*0.7));
+      const cell = avail.shift();
+      if(cell) gameState.board[cell.r][cell.c] = u;
+    });
+  };
+  assign(hide,   cell=> cell.r);                    // 뒤(row0)일수록 우선
+  assign(core,   cell=> Math.abs(cell.r - mid));    // 중간 줄 우선
+  assign(others, cell=> (front - cell.r));          // 앞줄일수록 우선
+  // 남은 유닛(혹시 모를)
+  pool.filter(u=>!onBoardAI(u)).forEach(u=>{ const cell=avail.shift(); if(cell) gameState.board[cell.r][cell.c]=u; });
 
   unsealAIKing('ai');   // 왕을 폭탄으로 가뒀으면 해제
   gameState.aiPlaced = true;
   log(`AI가 ${totalUnits()}마리 유닛을 상단 진영에 비밀리에 배치했습니다.`, 'sys');
+}
+function onBoardAI(u){
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++) if(gameState.board[r][c]===u) return true;
+  return false;
 }
 
 function placedCount(){
@@ -1456,28 +1467,40 @@ function aiTurn(){
     return false;
   }
 
+  // 반복/춤추기 감지: 최근 AI 이동 히스토리
+  const hist = gameState.aiHist || (gameState.aiHist=[]);
+  const recent = hist.slice(-6);
+  const opening = (gameState.aiMoveCount||0) < 6;          // 초반: 전개 장려
+  // 같은 말로 비포획 이동만 3번 연속이면 babysitting → 그 말 포기
+  const fleeId = (()=>{
+    const l3 = hist.slice(-3);
+    return (l3.length>=3 && l3.every(h=>!h.cap && h.id===l3[0].id)) ? l3[0].id : null;
+  })();
+  const recentKey = (id,rr,cc)=>recent.some(h=>h.id===id && h.r===rr && h.c===cc);
+
   let best=null, bestScore=-Infinity;
   for(const {u,r,c} of myUnits){
+    const babysat = (u.id===fleeId);
     for(const m of getValidMoves(r,c)){
       const target = gameState.board[m.r][m.c];
       let score;
       if(target){
         const pw = pWin(u, target, m.r, m.c, true);
         const ev = estVal(target, m.r, m.c);
-        // 지면 내 말을 잃음 — 되받아칠 아군이 있으면 손실 완화, 없으면 손실 회피 강화
         let loss = aiValue(u) * (canRecapture(m.r,m.c,u) ? 0.5 : 1.3);
         score = pw*ev - (1-pw)*loss;
-        // 이겨도 그 자리가 위험하면(되잡힘) 감점 — '이기면 그다음'
-        score -= pw * dangerProb(u, m.r, m.c, {r,c})*aiValue(u)*0.7;
-        // 내 왕 인접 적은 정체와 무관하게 치명(왕은 모두에게 패배) → 제거 최우선
-        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200;
+        score -= pw * dangerProb(u, m.r, m.c, {r,c})*aiValue(u)*0.6;   // 이기면 그다음(되잡힘)
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200; // 왕 위협 제거
       } else {
-        score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12);  // 전진(아래로), 값진 말은 덜
+        score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12) * (opening?1.6:1); // 전진(초반 가중)
         const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c,null);
-        score -= dNew*aiValue(u);                          // 위험한 칸 회피
-        if(dOld>dNew) score += (dOld-dNew)*aiValue(u)*0.8; // 위험 탈출
-        if(!u.hasMoved) score -= 0.9;                      // 아직 안 움직인 말은 정보 노출 비용
+        const dw = babysat ? 0.3 : 0.6;                    // 회피 강도(과하지 않게, 도망만 친 말은 약화)
+        score -= dNew*aiValue(u)*dw;                       // 위험한 칸 회피
+        if(dOld>dNew && !babysat) score += (dOld-dNew)*aiValue(u)*0.5; // 위험 탈출
+        if(!u.hasMoved && !opening) score -= 0.2;          // 정보 노출 비용(초반엔 전개가 이득이라 면제)
         if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3; // 왕 수비
+        if(recentKey(u.id,m.r,m.c)) score -= aiValue(u)*0.5 + 3;       // 최근 갔던 칸 재방문 = 춤추기 감점
+        if(babysat) score -= 4;                            // 같은 말 또 움직이기 자제(다른 말로 이득)
       }
       score += Math.random()*0.35;   // 동점 흔들기(루프 방지)
       if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
@@ -1485,7 +1508,12 @@ function aiTurn(){
   }
 
   if(best){
+    const movingId = gameState.board[best.from.r][best.from.c].id;
+    const wasCap = !!gameState.board[best.to.r][best.to.c];
     doMove(best.from, best.to, 'ai');
+    hist.push({id:movingId, r:best.to.r, c:best.to.c, cap:wasCap});
+    if(hist.length>12) hist.shift();
+    gameState.aiMoveCount = (gameState.aiMoveCount||0) + 1;
   } else {
     log('AI가 움직일 수 없어 턴을 넘깁니다.', 'sys');
   }
