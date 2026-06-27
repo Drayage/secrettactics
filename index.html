@@ -1528,6 +1528,17 @@ function aiTurn(){
   })();
   const recentKey = (id,rr,cc)=>recent.some(h=>h.id===id && h.r===rr && h.c===cc);
 
+  // 사냥 대상: 정체를 알거나(스파이 등) 강하다고 추정되는 적 강한 말(별 등)
+  const hunts=[];
+  for(let r=0;r<MAP_CONFIG.rows;r++)
+    for(let c=0;c<MAP_CONFIG.cols;c++){
+      const pu=gameState.board[r][c];
+      if(pu && pu.owner==='player'){
+        const val = pu.revealedTo==='ai' ? aiValue(pu) : estVal(pu,r,c);
+        if(val>=9) hunts.push({r,c,pu,val});
+      }
+    }
+
   let best=null, bestScore=-Infinity;
   for(const {u,r,c} of myUnits){
     const babysat = (u.id===fleeId);
@@ -1563,6 +1574,18 @@ function aiTurn(){
         if(recentKey(u.id,m.r,m.c)) score -= aiValue(u)*0.5 + 3;       // 재방문(춤추기) 감점
         if(babysat) score -= 4;
         if(frozen) score -= 40;                            // 디코이 동결(기만 유지)
+      }
+      // 사냥: 내가 잡을 수 있는(별킬러→별 등) 강한 적에게 접근하면 진형을 그쪽으로.
+      // 단, 목적지가 위험하면(별킬러가 숫자 사거리 등) 유인을 줄여 '조심히' 접근
+      if(hunts.length){
+        const safe = 1 - 0.8*dangerProb(u, m.r, m.c);
+        for(const t of hunts){
+          if(t.r===m.r && t.c===m.c) continue;             // 직접 공격은 별도 평가됨
+          if(pWin(u, t.pu, t.r, t.c, true) > 0.7){
+            const dOldH=Math.abs(r-t.r)+Math.abs(c-t.c), dNewH=Math.abs(m.r-t.r)+Math.abs(m.c-t.c);
+            if(dNewH<dOldH) score += Math.max(0,safe) * t.val*0.5/Math.max(1,dNewH);
+          }
+        }
       }
       score += Math.random()*0.35;
       if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
