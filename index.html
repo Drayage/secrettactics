@@ -853,6 +853,7 @@ function makeUnit(def, owner){
     revealedTo: null,      // 이 유닛 정체를 알게 된 상대 진영('player'|'ai'|null)
     kills: 0,              // 처치 수 (킬로그)
     bestVictim: null,      // 처치한 가장 강한 상대 말 {label, power}
+    hasMoved: false,       // 한 번이라도 이동했는지(공개 정보 — 폭탄·왕 아님)
   };
 }
 
@@ -1221,6 +1222,7 @@ function doMove(from, to, mover){
 
   // 직전 이동 기록 (이동한 유닛이 살아남는 경우에만 의미가 있음)
   const recordMove = (survived)=>{
+    if(survived) att.hasMoved=true;   // 공개 정보: 이 말은 이동 가능(폭탄·왕 아님)
     gameState.lastMove[mover] = survived
       ? { unitId: att.id, fromR: from.r, fromC: from.c }
       : null;
@@ -1382,50 +1384,59 @@ function aiTurn(){
       if(u.owner==='player' && u.revealedTo==='ai') revealedCount[u.key]=(revealedCount[u.key]||0)+1;
     }
 
-  // (pr,pc)의 알 수 없는 적 말이 가질 수 있는 타입 분포. attackerOnly면 이동가능(폭탄·왕 제외)만.
-  function typeDist(pr,pc, attackerOnly){
-    const moved = pr < MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows;  // 자기 진영 밖 = 움직인 말
+  // 알 수 없는 적 말의 타입 분포. moved=이미 이동한 말(폭탄·왕 아님), attackerOnly=공격 가능만(폭탄·왕 제외)
+  function typeDist(moved, attackerOnly){
     const dist=[];
     UNIT_CONFIG.forEach(d=>{
-      if((attackerOnly||moved) && (d.role==='king'||d.isGas)) return;  // 폭탄·왕은 공격 못함/안 움직임
+      if((attackerOnly||moved) && (d.role==='king'||d.isGas)) return;
       const w=(deckCount[d.key]||0)-(revealedCount[d.key]||0);
       if(w>0) dist.push({def:d, w});
     });
     return dist;
   }
-  // 내 말 u가 (pr,pc)의 적 말 pu를 이길 확률. att=true: 내가 공격 / false: 적이 나를 공격
+  const isMoved=(pu,pr)=> pu.hasMoved || pr < MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows;
+  // 내 말 u가 적 말 pu를 이길 확률. att=true: 내가 공격 / false: 적이 나를 공격
   function pWin(u, pu, pr, pc, att){
     if(pu.revealedTo==='ai'){
       const res = att ? resolveCombat(u,pu) : resolveCombat(pu,u);
       return (att ? res==='attacker' : res==='defender') ? 1 : 0;
     }
-    const dist=typeDist(pr,pc, !att); let tot=0, win=0;
+    const dist=typeDist(isMoved(pu,pr), !att); let tot=0, win=0;
     dist.forEach(({def,w})=>{ tot+=w;
       const res = att ? resolveCombat(u,def) : resolveCombat(def,u);
       if(att ? res==='attacker' : res==='defender') win+=w;
     });
     return tot ? win/tot : 0.5;
   }
-  // (pr,pc) 적 말을 잡았을 때 기대 가치
   function estVal(pu,pr,pc){
     if(pu.revealedTo==='ai') return aiValue(pu);
-    const dist=typeDist(pr,pc,false); let tot=0,sum=0;
+    const dist=typeDist(isMoved(pu,pr),false); let tot=0,sum=0;
     dist.forEach(({def,w})=>{ tot+=w; sum+=w*aiValue(def); });
     return tot ? sum/tot : 5;
   }
-  // 내 말 u가 (rr,cc)에 있을 때 다음 턴 잡힐 위험확률(인접 적의 추정 공격 성공률 최댓값)
-  function dangerProb(u, rr, cc){
+  function dangerProb(u, rr, cc, skip){
     let worst=0;
     const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
     for(const [dr,dc] of dirs){
       const nr=rr+dr, nc=cc+dc;
       if(!inBounds(nr,nc)) continue;
+      if(skip && nr===skip.r && nc===skip.c) continue;
       const pu=gameState.board[nr][nc];
-      if(pu && pu.owner==='player'){
-        worst=Math.max(worst, 1 - pWin(u, pu, nr, nc, false));  // 1 - (내가 막을 확률)
-      }
+      if(pu && pu.owner==='player') worst=Math.max(worst, 1 - pWin(u, pu, nr, nc, false));
     }
     return worst;
+  }
+  // 내가 이 공격에 지더라도, 살아남은 적을 다른 아군이 되받아칠 수 있는가(손실 완화)
+  function canRecapture(tr, tc, exclude){
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    const tgt=gameState.board[tr][tc];
+    for(const [dr,dc] of dirs){
+      const nr=tr+dr, nc=tc+dc;
+      if(!inBounds(nr,nc)) continue;
+      const au=gameState.board[nr][nc];
+      if(au && au.owner==='ai' && au.movable && au!==exclude && pWin(au, tgt, tr, tc, true)>0.6) return true;
+    }
+    return false;
   }
 
   let best=null, bestScore=-Infinity;
@@ -1436,18 +1447,22 @@ function aiTurn(){
       if(target){
         const pw = pWin(u, target, m.r, m.c, true);
         const ev = estVal(target, m.r, m.c);
-        score = pw*(100+ev) - (1-pw)*aiValue(u);          // 기대 포획이득 - 패배 손실
-        // 내 왕 인접의 적은 정체와 무관하게 치명(왕은 모두에게 패배) → 제거 최우선
-        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 300;
-        score -= dangerProb(u, m.r, m.c)*aiValue(u)*0.6;  // 되잡힐 위험
+        // 지면 내 말을 잃음 — 되받아칠 아군이 있으면 손실 완화, 없으면 손실 회피 강화
+        let loss = aiValue(u) * (canRecapture(m.r,m.c,u) ? 0.5 : 1.3);
+        score = pw*ev - (1-pw)*loss;
+        // 이겨도 그 자리가 위험하면(되잡힘) 감점 — '이기면 그다음'
+        score -= pw * dangerProb(u, m.r, m.c, {r,c})*aiValue(u)*0.7;
+        // 내 왕 인접 적은 정체와 무관하게 치명(왕은 모두에게 패배) → 제거 최우선
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200;
       } else {
-        score = (m.r - r) * (1.2 + (10 - Math.min(10, aiValue(u)))*0.15);  // 전진(아래로)
-        const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c);
+        score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12);  // 전진(아래로), 값진 말은 덜
+        const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c,null);
         score -= dNew*aiValue(u);                          // 위험한 칸 회피
-        if(dOld>dNew) score += (dOld-dNew)*aiValue(u)*0.7; // 위험 탈출
+        if(dOld>dNew) score += (dOld-dNew)*aiValue(u)*0.8; // 위험 탈출
+        if(!u.hasMoved) score -= 0.9;                      // 아직 안 움직인 말은 정보 노출 비용
         if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3; // 왕 수비
       }
-      score += Math.random()*0.4;   // 동점 흔들기(루프 방지)
+      score += Math.random()*0.35;   // 동점 흔들기(루프 방지)
       if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
     }
   }
