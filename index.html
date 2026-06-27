@@ -1349,9 +1349,33 @@ function showResult(){
 /* =================================================================
    [2-4] AI 행동 로직
    ================================================================= */
+// 유닛 가치 (포획 우선순위 / 손실 회피)
+function aiValue(u){
+  if(!u) return 0;
+  if(u.role==='king') return 100;
+  if(u.role==='starkiller') return 9;   // 별을 잡는 위협적인 말
+  if(u.isGas) return 7;                  // 폭탄
+  if(u.role==='defuser') return 5;
+  if(u.role==='spy') return 4;
+  if(u.isStar) return Math.min(20, u.power);
+  return Math.max(1, u.power||1);        // 숫자
+}
+// (rr,cc)에 있는 내 유닛 u가 인접 플레이어 유닛에게 다음 턴 잡히는가
+function aiInDanger(u, rr, cc){
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  for(const [dr,dc] of dirs){
+    const nr=rr+dr, nc=cc+dc;
+    if(!inBounds(nr,nc)) continue;
+    const pu=gameState.board[nr][nc];
+    if(pu && pu.owner==='player' && pu.movable && resolveCombat(pu, u)==='attacker') return true;
+  }
+  return false;
+}
+
 function aiTurn(){
   if(gameState.phase!=='playing' || gameState.turn!=='ai') return;
 
+  const myKing = findKing('ai');
   const myUnits = [];
   for(let r=0;r<MAP_CONFIG.rows;r++)
     for(let c=0;c<MAP_CONFIG.cols;c++){
@@ -1359,56 +1383,35 @@ function aiTurn(){
       if(u && u.owner==='ai' && u.movable) myUnits.push({u,r,c});
     }
 
-  // 플레이어 왕 위치(방어 판단용 — AI는 자기 왕 보호)
-  let myKing=null;
-  for(let r=0;r<MAP_CONFIG.rows;r++)
-    for(let c=0;c<MAP_CONFIG.cols;c++){
-      const u=gameState.board[r][c];
-      if(u && u.owner==='ai' && u.role==='king') myKing={r,c};
-    }
-
-  const attacks=[];   // 1순위
-  const defenses=[];  // 2순위
-  const advances=[];  // 3순위
-
+  let best=null, bestScore=-Infinity;
   for(const {u,r,c} of myUnits){
     for(const m of getValidMoves(r,c)){
       const target = gameState.board[m.r][m.c];
+      let score;
       if(target){
-        // 공격 후보 — 이기거나(공격자 승) 동귀어진으로 왕 등 가치 교환
         const res = resolveCombat(u, target);
-        if(res==='attacker'){
-          const gain = target.role==='king'?1000:(target.power??5);
-          attacks.push({from:{r,c},to:{r:m.r,c:m.c},score:gain - u.power*0.01});
-        } else if(res==='both' && (target.role==='king')){
-          attacks.push({from:{r,c},to:{r:m.r,c:m.c},score:500});
+        if(res!=='attacker'){ score = -100 - aiValue(u); }      // 지는 공격은 회피
+        else if(target.role==='king'){ score = 1e6; }           // 플레이어 왕 포획 = 즉시 승리
+        else {
+          score = 100 + aiValue(target);                        // 포획 이득
+          if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 5000; // 내 왕 위협 제거
+          if(aiInDanger(u, m.r, m.c)) score -= aiValue(u)*0.8;  // 되잡힐 위험
         }
       } else {
-        // 방어: 내 왕 인접에 플레이어 유닛이 접근했는가
-        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)){
-          defenses.push({from:{r,c},to:{r:m.r,c:m.c},score:u.power});
-        }
-        // 전진: 플레이어 진영(아래쪽)으로 — 낮은 계급/스파이 우선
-        const towardScore = (m.r - r) + (u.role==='spy'?2:0) + (10-(u.power||0))*0.05;
-        advances.push({from:{r,c},to:{r:m.r,c:m.c},score:towardScore});
+        // 빈 칸 이동: 플레이어 진영(아래)으로 전진 + 위험 회피
+        score = (m.r - r) * (1.2 + (10 - Math.min(10, aiValue(u)))*0.15);
+        if(aiInDanger(u, m.r, m.c)) score -= aiValue(u)*1.0;     // 위험한 칸으로 들어가지 않기
+        if(aiInDanger(u, r, c) && !aiInDanger(u, m.r, m.c)) score += aiValue(u)*0.7; // 위험 탈출
+        // 내 왕 곁을 너무 비우지 않게 약한 보너스(왕 근처 수비)
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3;
       }
+      score += Math.random()*0.4;   // 동점 흔들기(루프 방지)
+      if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
     }
   }
 
-  let choice=null;
-  if(attacks.length){
-    attacks.sort((a,b)=>b.score-a.score); choice=attacks[0];
-  } else if(defenses.length){
-    defenses.sort((a,b)=>b.score-a.score); choice=defenses[0];
-  } else if(advances.length){
-    // 약간의 무작위성 — 상위 후보 중 랜덤
-    advances.sort((a,b)=>b.score-a.score);
-    const top = advances.slice(0, Math.min(4,advances.length));
-    choice = top[Math.floor(Math.random()*top.length)];
-  }
-
-  if(choice){
-    doMove(choice.from, choice.to, 'ai');
+  if(best){
+    doMove(best.from, best.to, 'ai');
   } else {
     log('AI가 움직일 수 없어 턴을 넘깁니다.', 'sys');
   }
