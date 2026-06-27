@@ -1017,13 +1017,26 @@ function placeAIUnits(){
       if(cell) gameState.board[cell.r][cell.c] = u;
     });
   };
-  assign(hide,   cell=> cell.r);                    // 뒤(row0)일수록 우선
-  assign(core,   cell=> Math.abs(cell.r - mid));    // 중간 줄 우선
-  assign(others, cell=> (front - cell.r));          // 앞줄일수록 우선
-  // 남은 유닛(혹시 모를)
+  // 기만 배치: 가끔 왕·폭탄을 전진(중간 줄)시키고 뒷줄엔 일반 말(디코이)을 둬서 오판 유도
+  const deceive = front>=2 && Math.random()<0.45;
+  if(deceive){
+    assign(hide,   cell=> Math.abs(cell.r - 1));     // 왕·폭탄을 2번째 줄(전진)로
+    assign(core,   cell=> Math.abs(cell.r - mid));
+    assign(others, cell=> cell.r);                   // 일반 말이 뒷줄/앞줄 채움(뒷줄 디코이)
+  } else {
+    assign(hide,   cell=> cell.r);                   // 표준: 왕·폭탄 뒷줄
+    assign(core,   cell=> Math.abs(cell.r - mid));   // 중간 코어
+    assign(others, cell=> (front - cell.r));         // 앞줄 스크린
+  }
   pool.filter(u=>!onBoardAI(u)).forEach(u=>{ const cell=avail.shift(); if(cell) gameState.board[cell.r][cell.c]=u; });
 
   unsealAIKing('ai');   // 왕을 폭탄으로 가뒀으면 해제
+
+  // 디코이: 뒷줄(row0)의 일반(이동가능) 말 1~2개를 초반에 안 움직여 '폭탄/왕'처럼 보이게
+  const backMovable=[];
+  for(let c=0;c<MAP_CONFIG.cols;c++){ const u=gameState.board[0][c]; if(u && u.owner==='ai' && u.movable) backMovable.push(u); }
+  backMovable.sort(()=>Math.random()-0.5).slice(0, deceive?2:1).forEach(u=>{ u.decoy=true; });
+
   gameState.aiPlaced = true;
   log(`AI가 ${totalUnits()}마리 유닛을 상단 진영에 비밀리에 배치했습니다.`, 'sys');
 }
@@ -1466,6 +1479,29 @@ function aiTurn(){
     }
     return false;
   }
+  // (rr,cc) 주변에서 나를 지원(되잡기)할 수 있는 가장 강한 아군 가치 — 에스코트/커플 전개용
+  function supportVal(rr,cc,exclude){
+    let best=0;
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of dirs){
+      const nr=rr+dr, nc=cc+dc;
+      if(!inBounds(nr,nc)) continue;
+      const au=gameState.board[nr][nc];
+      if(au && au.owner==='ai' && au.movable && au!==exclude) best=Math.max(best, aiValue(au));
+    }
+    return best;
+  }
+  // 강한 말 u가 m으로 가면, 더 앞선 약한 아군(프로브)을 호위하게 되는가
+  function followsProbe(u, m){
+    const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of dirs){
+      const nr=m.r+dr, nc=m.c+dc;
+      if(!inBounds(nr,nc)) continue;
+      const au=gameState.board[nr][nc];
+      if(au && au.owner==='ai' && au.movable && au!==u && aiValue(au)<aiValue(u) && nr>=m.r) return true;
+    }
+    return false;
+  }
 
   // 반복/춤추기 감지: 최근 AI 이동 히스토리
   const hist = gameState.aiHist || (gameState.aiHist=[]);
@@ -1481,6 +1517,7 @@ function aiTurn(){
   let best=null, bestScore=-Infinity;
   for(const {u,r,c} of myUnits){
     const babysat = (u.id===fleeId);
+    const frozen = (u.decoy && (gameState.aiMoveCount||0) < 14);   // 디코이는 초반에 가만히(기만)
     for(const m of getValidMoves(r,c)){
       const target = gameState.board[m.r][m.c];
       let score;
@@ -1490,19 +1527,24 @@ function aiTurn(){
         let loss = aiValue(u) * (canRecapture(m.r,m.c,u) ? 0.5 : 1.3);
         score = pw*ev - (1-pw)*loss;
         score -= pw * dangerProb(u, m.r, m.c, {r,c})*aiValue(u)*0.6;   // 이기면 그다음(되잡힘)
-        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200; // 왕 위협 제거
+        if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c)) score += 4000*pw + 200; // 왕 위협 제거(디코이라도)
       } else {
-        score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12) * (opening?1.6:1); // 전진(초반 가중)
+        const sup = supportVal(m.r,m.c,u);                 // 이동 후 뒤를 받쳐줄 아군 가치
+        const supported = sup>=8;                          // 별/별킬러급 백업이 있으면 미끼 전개 OK
+        score = (m.r - r) * (1.0 + (10 - Math.min(10, aiValue(u)))*0.12) * (opening?1.6:1); // 전진
         const dNew=dangerProb(u,m.r,m.c), dOld=dangerProb(u,r,c,null);
-        const dw = babysat ? 0.3 : 0.6;                    // 회피 강도(과하지 않게, 도망만 친 말은 약화)
-        score -= dNew*aiValue(u)*dw;                       // 위험한 칸 회피
+        const dw = babysat ? 0.3 : (supported ? 0.3 : 0.6); // 백업 있으면 위험 감수(되잡기 가능)
+        score -= dNew*aiValue(u)*dw;
         if(dOld>dNew && !babysat) score += (dOld-dNew)*aiValue(u)*0.5; // 위험 탈출
-        if(!u.hasMoved && !opening) score -= 0.2;          // 정보 노출 비용(초반엔 전개가 이득이라 면제)
+        if(supported && aiValue(u)<=4) score += 2.2;       // 약한 말이 백업 받으며 전진(에스코트 프로브)
+        if(aiValue(u)>=9 && followsProbe(u,m)) score += 2.0; // 강한 말이 앞선 약한 아군을 호위
+        if(!u.hasMoved && !opening) score -= 0.2;
         if(myKing && isAdjacent(m.r,m.c,myKing.r,myKing.c) && playerNear(myKing)) score += 3; // 왕 수비
-        if(recentKey(u.id,m.r,m.c)) score -= aiValue(u)*0.5 + 3;       // 최근 갔던 칸 재방문 = 춤추기 감점
-        if(babysat) score -= 4;                            // 같은 말 또 움직이기 자제(다른 말로 이득)
+        if(recentKey(u.id,m.r,m.c)) score -= aiValue(u)*0.5 + 3;       // 재방문(춤추기) 감점
+        if(babysat) score -= 4;
+        if(frozen) score -= 40;                            // 디코이 동결(기만 유지)
       }
-      score += Math.random()*0.35;   // 동점 흔들기(루프 방지)
+      score += Math.random()*0.35;
       if(score>bestScore){ bestScore=score; best={from:{r,c},to:{r:m.r,c:m.c}}; }
     }
   }
