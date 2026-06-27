@@ -853,6 +853,7 @@ function makeUnit(def, owner){
     revealedTo: null,      // 이 유닛 정체를 알게 된 상대 진영('player'|'ai'|null)
     kills: 0,              // 처치 수 (킬로그)
     bestVictim: null,      // 처치한 가장 강한 상대 말 {label, power}
+    beat: [],              // 격파한 상대 말 key 목록(추론용 — 이 말은 그것들을 이길 수 있는 타입)
     hasMoved: false,       // 한 번이라도 이동했는지(공개 정보 — 폭탄·왕 아님)
   };
 }
@@ -1253,6 +1254,8 @@ function doMove(from, to, mover){
     winner.kills = (winner.kills||0) + 1;
     const lp = (loser.power==null) ? -99 : loser.power;
     if(!winner.bestVictim || lp > winner.bestVictim.power) winner.bestVictim = { label:loser.label, power:lp };
+    winner.beat = winner.beat || [];
+    if(!winner.beat.includes(loser.key)) winner.beat.push(loser.key);   // 격파 기록(추론용)
     if(rc) winner.revealedTo = opponentSide(winner.owner);
   };
 
@@ -1384,24 +1387,38 @@ function aiTurn(){
       if(u.owner==='player' && u.revealedTo==='ai') revealedCount[u.key]=(revealedCount[u.key]||0)+1;
     }
 
-  // 알 수 없는 적 말의 타입 분포. moved=이미 이동한 말(폭탄·왕 아님), attackerOnly=공격 가능만(폭탄·왕 제외)
-  function typeDist(moved, attackerOnly){
-    const dist=[];
-    UNIT_CONFIG.forEach(d=>{
-      if((attackerOnly||moved) && (d.role==='king'||d.isGas)) return;
-      const w=(deckCount[d.key]||0)-(revealedCount[d.key]||0);
-      if(w>0) dist.push({def:d, w});
-    });
+  const isMoved=(pu,pr)=> pu.hasMoved || pr < MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows;
+  // def 타입이 victim(내 말)을 이길 수 있는가 (공격이든 방어든)
+  function canBeat(def, vdef){
+    return resolveCombat(def,vdef)==='attacker' || resolveCombat(vdef,def)==='defender';
+  }
+  // 알 수 없는 적 말 pu가 가질 수 있는 타입 분포.
+  //  - 움직인 말/공격자는 폭탄·왕 제외
+  //  - 추론: pu가 격파한 내 말(pu.beat)들을 이길 수 있는 타입만 (전투 결과 기억)
+  function typeDist(pu, pr, attackerOnly){
+    const moved = isMoved(pu,pr);
+    const beat = pu.beat||[];
+    const build=(useBeat)=>{
+      const dist=[];
+      UNIT_CONFIG.forEach(d=>{
+        if((attackerOnly||moved) && (d.role==='king'||d.isGas)) return;
+        if(useBeat){ for(const vk of beat){ const vd=UNIT_BY_KEY[vk]; if(vd && !canBeat(d,vd)) return; } }
+        const w=(deckCount[d.key]||0)-(revealedCount[d.key]||0);
+        if(w>0) dist.push({def:d, w});
+      });
+      return dist;
+    };
+    let dist=build(true);
+    if(!dist.length) dist=build(false);   // 제약이 모순이면 폴백
     return dist;
   }
-  const isMoved=(pu,pr)=> pu.hasMoved || pr < MAP_CONFIG.rows - MAP_CONFIG.playerZoneRows;
   // 내 말 u가 적 말 pu를 이길 확률. att=true: 내가 공격 / false: 적이 나를 공격
   function pWin(u, pu, pr, pc, att){
     if(pu.revealedTo==='ai'){
       const res = att ? resolveCombat(u,pu) : resolveCombat(pu,u);
       return (att ? res==='attacker' : res==='defender') ? 1 : 0;
     }
-    const dist=typeDist(isMoved(pu,pr), !att); let tot=0, win=0;
+    const dist=typeDist(pu, pr, !att); let tot=0, win=0;
     dist.forEach(({def,w})=>{ tot+=w;
       const res = att ? resolveCombat(u,def) : resolveCombat(def,u);
       if(att ? res==='attacker' : res==='defender') win+=w;
@@ -1410,7 +1427,7 @@ function aiTurn(){
   }
   function estVal(pu,pr,pc){
     if(pu.revealedTo==='ai') return aiValue(pu);
-    const dist=typeDist(isMoved(pu,pr),false); let tot=0,sum=0;
+    const dist=typeDist(pu, pr, false); let tot=0,sum=0;
     dist.forEach(({def,w})=>{ tot+=w; sum+=w*aiValue(def); });
     return tot ? sum/tot : 5;
   }
