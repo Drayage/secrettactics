@@ -1989,6 +1989,27 @@ async function joinRoom(){
 }
 
 let _roomSubscribed=false;
+// 상대 접속 상태(presence) 추적 — 새로고침/짧은 끊김을 이탈로 오판하지 않도록
+// 30초 유예 후에만 "연결 종료"로 확정한다 (room 자체는 onDisconnect로 지우지 않음 — 위 참고).
+let _oppEverPresent=false;
+let _oppDisconnectTimer=null;
+let _disconnectNotified=false;
+const oppRoleOf=(role)=> role==='host' ? 'guest' : 'host';
+
+function trackPresence(code, role){
+  window.MP._update('chetics_rooms/'+code+'/presence', {[role]:true});
+  window.MP._onDisconnectRemove('chetics_rooms/'+code+'/presence/'+role);
+}
+
+function notifyDisconnect(msg){
+  if(_disconnectNotified) return;
+  _disconnectNotified=true;
+  log(msg,'sys');
+  const info=document.getElementById('onlineInfo');
+  if(info) info.textContent=msg;
+  setTimeout(backToMenu, 4000);
+}
+
 function enterOnline(code, role, side){
   gameState.mode='online'; gameState.mySide=side; gameState.online={code, role};
   document.getElementById('modeOverlay').classList.remove('show');
@@ -1996,14 +2017,29 @@ function enterOnline(code, role, side){
   initGame();
   document.getElementById('startBtn').textContent='준비 완료';
   document.getElementById('onlineInfo').textContent=`방 ${code} · ${role==='host'?'호스트':'게스트'}`;
+  trackPresence(code, role);
   if(!_roomSubscribed){ window.MP._onValue('chetics_rooms/'+code, handleRoom); _roomSubscribed=true; }
   log(`온라인 대전 입장 (방 ${code}). 내 진영을 배치하고 '준비 완료'를 누르세요.`,'sys');
 }
 
 function handleRoom(room){
   if(!room){
-    if(gameState.phase!=='over'){ alert('상대 연결이 종료되었습니다.'); backToMenu(); }
+    if(gameState.phase!=='over') notifyDisconnect('상대 연결이 종료되었습니다.');
     return;
+  }
+  // 상대 presence 추적: 사라지면 즉시가 아니라 30초 유예 후 이탈로 확정
+  if(gameState.online && gameState.phase!=='over'){
+    const oppRole=oppRoleOf(gameState.online.role);
+    const oppPresent=!!(room.presence && room.presence[oppRole]);
+    if(oppPresent){
+      _oppEverPresent=true;
+      if(_oppDisconnectTimer){ clearTimeout(_oppDisconnectTimer); _oppDisconnectTimer=null; }
+    }else if(_oppEverPresent && !_oppDisconnectTimer){
+      _oppDisconnectTimer=setTimeout(()=>{
+        _oppDisconnectTimer=null;
+        if(gameState.phase!=='over') notifyDisconnect('상대 연결이 끊어졌습니다 (30초 경과).');
+      }, 30000);
+    }
   }
   // 상대 입장 알림 (배치 단계)
   if(gameState.phase==='setup'){
@@ -2214,6 +2250,7 @@ async function resumeOnline(){
   try{
     if(!window.MP.configured()) return;     // 설정 없으면 로컬 화면만 유지
     await window.MP.init();
+    trackPresence(code, gameState.online.role);
     if(!_roomSubscribed){ window.MP._onValue('chetics_rooms/'+code, handleRoom); _roomSubscribed=true; }
   }catch(e){ /* 오프라인이면 로컬 상태만 표시 */ }
 }
